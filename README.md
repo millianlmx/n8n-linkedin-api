@@ -22,9 +22,6 @@ cp .env.example .env
 # Build n8n custom nodes
 cd n8n_custom_nodes && npm install && npm run build && cd ..
 
-# 3. Build the project
-npm run build
-
 # 4. Start with Docker/Podman
 podman compose up -d
 

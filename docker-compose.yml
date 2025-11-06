@@ -43,7 +43,7 @@ services:
       - NODE_ENV=production
       - WEBHOOK_URL=http://localhost:5678/
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
-      - N8N_COMMUNITY_PACKAGES_ENABLED=false
+      - N8N_COMMUNITY_PACKAGES_ENABLED=true
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n_custom_nodes:/home/node/.n8n/custom
