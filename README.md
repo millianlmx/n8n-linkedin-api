@@ -19,6 +19,9 @@ npm install
 cp .env.example .env
 # Edit .env with your LinkedIn credentials
 
+# Build n8n custom nodes
+cd n8n_custom_nodes && npm install && npm run build && cd ..
+
 # 3. Build the project
 npm run build
 
@@ -46,7 +49,7 @@ podman compose up -d
 ## Project Structure
 
 ```
-windsurf-project-3/
+n8n-linkedin-api/
 ├── src/
 │   ├── routes/             # API route handlers
 │   ├── services/           # Business logic (LinkedInService, CacheService)
