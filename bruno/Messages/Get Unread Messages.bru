@@ -1,0 +1,57 @@
+meta {
+  name: Get Unread Messages
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/messages/unread?sessionId={{sessionId}}
+  body: none
+  auth: none
+}
+
+params:query {
+  sessionId: {{sessionId}}
+}
+
+docs {
+  # Get Unread Messages
+  
+  Retrieves all unread/new messages from LinkedIn conversations.
+  
+  ## Response
+  
+  Returns conversations that have:
+  - Unread badge with count
+  - Bold message text (unread indicator)
+  - Special unread class
+  
+  Each conversation includes:
+  - `name`: Contact name
+  - `lastMessage`: Last message text
+  - `lastMessageSentByYou`: Who sent last message
+  - `timestamp`: When last message was sent
+  - `unreadCount`: Number of unread messages
+  - `isUnread`: Always true
+  - `url`: Conversation URL
+  
+  ## Example Response
+  
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "index": 0,
+        "name": "Nicolas BRIFFAUD",
+        "lastMessage": "Nicolas : Zeyzey triple zey",
+        "lastMessageSentByYou": false,
+        "timestamp": "22:56",
+        "unreadCount": 1,
+        "isUnread": true,
+        "url": "https://www.linkedin.com/messaging/thread/2-..."
+      }
+    ]
+  }
+  ```
+}

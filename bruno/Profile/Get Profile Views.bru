@@ -1,0 +1,21 @@
+meta {
+  name: Get Profile Views
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/profile/views?sessionId={{sessionId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("should return 200 OK", function() {
+    expect(res.status).to.equal(200);
+  });
+  
+  test("should return success true", function() {
+    expect(res.body.success).to.equal(true);
+  });
+}

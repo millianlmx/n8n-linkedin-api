@@ -1,0 +1,48 @@
+meta {
+  name: Force Authenticate Session
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/auth/force-authenticate
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "sessionId": "{{sessionId}}"
+  }
+}
+
+docs {
+  # Force Authenticate Session
+  
+  **Use this as a workaround** when the browser is on the feed page but `isAuthenticated` is still false.
+  
+  ## When to Use
+  - Login times out but browser is on `/feed`
+  - Session status shows `currentUrl: "https://www.linkedin.com/feed/"` but `isAuthenticated: false`
+  
+  ## Usage
+  1. Check session status first
+  2. If on `/feed` but not authenticated, use this endpoint
+  3. Session will be marked as authenticated
+  
+  ## Response
+  ```json
+  {
+    "success": true,
+    "message": "Session marked as authenticated",
+    "session": {
+      "id": "abc-123",
+      "isAuthenticated": true,
+      "currentUrl": "https://www.linkedin.com/feed/"
+    }
+  }
+  ```
+  
+  ## Warning
+  This is a workaround. The proper fix is to ensure login completes without timeout.
+}

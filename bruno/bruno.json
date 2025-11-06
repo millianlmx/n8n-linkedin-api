@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "LinkedIn Scraper API",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

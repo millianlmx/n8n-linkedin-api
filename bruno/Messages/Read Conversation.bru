@@ -1,0 +1,30 @@
+meta {
+  name: Read Conversation
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/messages/conversation?sessionId={{sessionId}}&conversationUrl=https://www.linkedin.com/messaging/thread/2-NTdhM2I5MzktOGMwZC00ZTU5LWE1MDEtZGUyMjJmMWQyOGE3XzEwMA==/
+  body: none
+  auth: none
+}
+
+params:query {
+  sessionId: {{sessionId}}
+  conversationUrl: https://www.linkedin.com/messaging/thread/2-NTdhM2I5MzktOGMwZC00ZTU5LWE1MDEtZGUyMjJmMWQyOGE3XzEwMA==/
+}
+
+tests {
+  test("should return 200 OK", function() {
+    expect(res.status).to.equal(200);
+  });
+  
+  test("should return success true", function() {
+    expect(res.body.success).to.equal(true);
+  });
+}
+
+docs {
+  Replace CONVERSATION_ID with an actual conversation URL from List Conversations
+}

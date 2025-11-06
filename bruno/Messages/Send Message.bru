@@ -1,0 +1,34 @@
+meta {
+  name: Send Message
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/messages/send
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "sessionId": "{{sessionId}}",
+    "conversationId": "https://www.linkedin.com/messaging/thread/CONVERSATION_ID",
+    "message": "Hello! This is a test message."
+  }
+}
+
+tests {
+  test("should return 200 OK", function() {
+    expect(res.status).to.equal(200);
+  });
+  
+  test("should return success true", function() {
+    expect(res.body.success).to.equal(true);
+  });
+}
+
+docs {
+  ⚠️ WARNING: This will actually send a message!
+  Replace CONVERSATION_ID with an actual conversation URL.
+}

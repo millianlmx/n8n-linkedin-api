@@ -1,0 +1,124 @@
+import { Router, Request, Response } from 'express';
+import LinkedInService from '../services/LinkedInService';
+
+const router = Router();
+
+/**
+ * GET /api/messages/conversations
+ * List all conversations
+ * Query: sessionId
+ */
+router.get('/conversations', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.query;
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required',
+      });
+    }
+
+    const result = await LinkedInService.listConversations(sessionId);
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/messages/unread
+ * Get all unread/new messages
+ * Query: sessionId
+ */
+router.get('/unread', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.query;
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required',
+      });
+    }
+
+    const result = await LinkedInService.getUnreadMessages(sessionId);
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/messages/conversation
+ * Read a specific conversation
+ * Query: sessionId, conversationUrl
+ */
+router.get('/conversation', async (req: Request, res: Response) => {
+  try {
+    const { sessionId, conversationUrl } = req.query;
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required',
+      });
+    }
+
+    if (!conversationUrl || typeof conversationUrl !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Conversation URL is required',
+      });
+    }
+
+    const result = await LinkedInService.readConversation(sessionId, conversationUrl);
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/messages/send
+ * Send a message to a conversation
+ * Body: { sessionId: string, conversationId: string, message: string }
+ */
+router.post('/send', async (req: Request, res: Response) => {
+  try {
+    const { sessionId, conversationId, message } = req.body;
+
+    if (!sessionId || !conversationId || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID, conversation ID, and message are required',
+      });
+    }
+
+    const result = await LinkedInService.sendMessage(sessionId, {
+      conversationId,
+      message,
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+export default router;

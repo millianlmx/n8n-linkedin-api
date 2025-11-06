@@ -1,0 +1,26 @@
+meta {
+  name: Initialize Session
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/auth/init
+  body: none
+  auth: none
+}
+
+tests {
+  test("should return 200 OK", function() {
+    expect(res.status).to.equal(200);
+  });
+  
+  test("should return success true", function() {
+    expect(res.body.success).to.equal(true);
+  });
+  
+  test("should return sessionId", function() {
+    expect(res.body.sessionId).to.be.a('string');
+    bru.setEnvVar("sessionId", res.body.sessionId);
+  });
+}

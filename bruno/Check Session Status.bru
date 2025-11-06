@@ -1,0 +1,42 @@
+meta {
+  name: Check Session Status
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/auth/session/{{sessionId}}
+  body: none
+  auth: none
+}
+
+docs {
+  # Check Session Status
+  
+  Check if a session is authenticated and get current browser URL.
+  
+  ## Usage
+  1. First run "Initialize Session" to get a sessionId
+  2. Run "Login" to authenticate
+  3. Run this request to verify authentication status
+  
+  ## Response
+  ```json
+  {
+    "success": true,
+    "session": {
+      "id": "abc-123-def-456",
+      "isAuthenticated": true,
+      "createdAt": "2025-10-28T...",
+      "lastUsed": "2025-10-28T...",
+      "currentUrl": "https://www.linkedin.com/feed/"
+    }
+  }
+  ```
+  
+  ## Troubleshooting
+  - If `isAuthenticated` is `false`, login didn't complete
+  - Check `currentUrl` to see where the browser ended up
+  - If on `/login`, credentials may be wrong
+  - If on `/checkpoint`, security challenge required
+}

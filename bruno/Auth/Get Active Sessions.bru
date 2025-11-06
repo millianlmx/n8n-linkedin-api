@@ -1,0 +1,25 @@
+meta {
+  name: Get Active Sessions
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/auth/sessions
+  body: none
+  auth: none
+}
+
+tests {
+  test("should return 200 OK", function() {
+    expect(res.status).to.equal(200);
+  });
+  
+  test("should return success true", function() {
+    expect(res.body.success).to.equal(true);
+  });
+  
+  test("should return sessions array", function() {
+    expect(res.body.sessions).to.be.an('array');
+  });
+}
