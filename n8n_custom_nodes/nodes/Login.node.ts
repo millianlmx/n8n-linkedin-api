@@ -9,6 +9,7 @@ export class Login implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'LinkedIn Login',
 		name: 'linkedInLogin',
+		usableAsTool: true,
 		icon: 'file:linkedin.svg',
 		group: ['transform'],
 		version: 1,

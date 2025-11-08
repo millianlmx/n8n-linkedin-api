@@ -11,6 +11,7 @@ export class Profile implements INodeType {
 		displayName: 'LinkedIn Profile',
 		name: 'linkedInProfile',
 		icon: 'file:linkedin.svg',
+		usableAsTool: true,
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',

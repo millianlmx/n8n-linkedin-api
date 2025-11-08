@@ -11,6 +11,7 @@ export class Search implements INodeType {
 		displayName: 'LinkedIn Search',
 		name: 'linkedInSearch',
 		icon: 'file:linkedin.svg',
+		usableAsTool: true,
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',

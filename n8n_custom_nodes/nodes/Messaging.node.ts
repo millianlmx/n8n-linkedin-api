@@ -11,6 +11,7 @@ export class Messaging implements INodeType {
 		displayName: 'LinkedIn Messaging',
 		name: 'linkedInMessaging',
 		icon: 'file:linkedin.svg',
+		usableAsTool: true,
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',

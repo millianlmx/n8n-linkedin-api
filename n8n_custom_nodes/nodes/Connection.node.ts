@@ -10,6 +10,7 @@ export class Connection implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'LinkedIn Connection',
 		name: 'linkedInConnection',
+		usableAsTool: true,
 		icon: 'file:linkedin.svg',
 		group: ['transform'],
 		version: 1,
