@@ -1,13 +1,14 @@
 # LinkedIn Scraper API
 
-A powerful, containerized REST API for scraping LinkedIn profiles with TypeScript, Express, Puppeteer, and PostgreSQL caching.
+A powerful, containerized REST API for LinkedIn automation with TypeScript, Express, Puppeteer, and PostgreSQL caching.
 
 ## 📚 Documentation
 
-- **[DOCUMENTATION.md](./DOCUMENTATION.md)** - Complete API reference and usage guide
-- **[CUSTOM_IMPLEMENTATION.md](./CUSTOM_IMPLEMENTATION.md)** - How LinkedIn automation works (architecture & implementation details)
-- **[DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md)** - Docker/Podman deployment guide
-- **[FINAL_COVERAGE_REPORT.md](./FINAL_COVERAGE_REPORT.md)** - Test coverage report (80.95% coverage achieved)
+- **[API Reference](./DOCUMENTATION.md)** - Complete endpoint documentation
+- **[Custom Implementation](./CUSTOM_IMPLEMENTATION.md)** - Architecture & implementation details
+- **[Docker Deployment](./DOCKER_DEPLOYMENT.md)** - Container deployment guide
+- **[Conversation URL Endpoint](./CONVERSATION_URL_ENDPOINT.md)** - Detailed guide for the new conversation URL feature
+- **[Test Coverage](./FINAL_COVERAGE_REPORT.md)** - 80.95% test coverage report
 
 ## Quick Start
 
@@ -38,6 +39,7 @@ podman compose up -d
 - ✅ **PostgreSQL Caching**: High-performance caching layer
 - ✅ **Connection Requests**: Automated connection management
 - ✅ **Messaging**: List, read, and send messages
+- ✅ **Get Conversation URL**: Retrieve conversation URL from profile URL (NEW!)
 - ✅ **Profile Visits**: Track and visit profiles
 - ✅ **Search People**: Find LinkedIn users by keywords
 - ✅ **Dockerized**: Easy deployment with Docker/Podman
@@ -71,13 +73,14 @@ POST   /api/profile/scrape         # Scrape profile
 POST   /api/profile/visit          # Visit profile
 GET    /api/profile/views          # Get views
 
-POST   /api/connection/connect     # Send connection
+POST   /api/connection/send-request     # Send connection
 
 GET    /api/messages/conversations # List conversations
 GET    /api/messages/conversation  # Read conversation
 POST   /api/messages/send          # Send message
+GET    /api/messages/conversation-url # Get conversation URL from profile (NEW!)
 
-POST   /api/search/people          # Search people (NEW!)
+POST   /api/search/people          # Search people
 ```
 
 ## Technology Stack
@@ -88,6 +91,7 @@ POST   /api/search/people          # Search people (NEW!)
 - **Logging**: Winston
 - **Containerization**: Docker/Podman
 - **Workflow Automation**: n8n
+- **API Testing**: Bruno
 
 ## Environment Variables
 
