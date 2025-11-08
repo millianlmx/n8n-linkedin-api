@@ -848,6 +848,102 @@ class LinkedInService {
       throw new Error(`Search failed: ${error.message}`);
     }
   }
+
+  async getConversationUrlFromProfile(sessionId: string, profileUrl: string) {
+    const session = SessionManager.getSession(sessionId);
+    if (!session || !session.isAuthenticated) {
+      throw new Error('Not authenticated');
+    }
+
+    const { page } = session;
+
+    try {
+      console.log(`💬 Getting conversation URL for profile: ${profileUrl}`);
+      
+      // Navigate to profile
+      await page.goto(profileUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 10000,
+      });
+
+      // Wait for profile to load
+      await Promise.race([
+        page.waitForSelector('.ph5.pb5', { timeout: 4000 }),
+        page.waitForSelector('main', { timeout: 4000 }),
+        page.waitForSelector('h1', { timeout: 4000 }),
+      ]).catch(() => {
+        console.log('⚠️  Profile content timeout, continuing...');
+      });
+
+      await this.wait(1000);
+
+      // Check connection status
+      const connectionStatus = await page.evaluate(DOMFunctions.checkConnectionStatus);
+      console.log(`  Connection status: ${connectionStatus.status}`);
+
+      // If pending, wait for connection to be accepted
+      // if (connectionStatus.status === 'pending') {
+      //   console.log('  ⏳ Connection request is pending. Waiting for acceptance...');
+      //   throw new Error('Connection request was not accepted');
+      // } else if (!connectionStatus.connected) {
+      //   throw new Error('User is not connected. Please send a connection request first.');
+      // }
+
+      // Extract profile name
+      const profileName = await page.evaluate(DOMFunctions.extractProfileName);
+      console.log(`  Profile name: ${profileName}`);
+
+      if (!profileName) {
+        throw new Error('Could not extract profile name');
+      }
+
+      // Split name into first and last name
+      const nameParts = profileName.split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || nameParts[0]; // If only one name, use it as both
+
+      console.log(`  Searching for: ${firstName} ${lastName}`);
+
+      // Navigate to messaging
+      console.log('  📬 Navigating to messaging...');
+      await page.goto('https://www.linkedin.com/messaging/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+
+      // Wait for conversations list to load
+      await page.waitForSelector('.msg-conversations-container__conversations-list', { timeout: 10000 });
+      await this.wait(2000);
+
+      // Find and click on the conversation by matching name
+      console.log(`  🔍 Searching for conversation in list (will scroll up to 5 times if needed)...`);
+      const result = await page.evaluate(DOMFunctions.findAndClickConversationByName, firstName, lastName);
+
+      if (!result.success) {
+        throw new Error(`No conversation found for ${profileName}. Make sure you have messaged this person before.`);
+      }
+
+      console.log(`  ✅ Found and clicked conversation: ${result.name}`);
+
+      // Wait for URL to change
+      await this.wait(1000);
+
+      // Get the conversation URL
+      const conversationUrl = page.url();
+      console.log(`  ✅ Conversation URL: ${conversationUrl}\n`);
+
+      return { 
+        success: true, 
+        data: {
+          profileName,
+          conversationUrl
+        }
+      };
+    } catch (error: any) {
+      console.error('❌ Failed to get conversation URL:', error.message);
+      throw new Error(`Failed to get conversation URL: ${error.message}`);
+    }
+  }
 }
 
 export default new LinkedInService();

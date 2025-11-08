@@ -1,0 +1,91 @@
+meta {
+  name: Get Conversation URL
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/messages/conversation-url?sessionId={{sessionId}}&profileUrl={{testProfileUrl}}
+  body: none
+  auth: none
+}
+
+params:query {
+  sessionId: {{sessionId}}
+  profileUrl: {{testProfileUrl}}
+}
+
+tests {
+  test("should return 200 OK", function() {
+    expect(res.status).to.equal(200);
+  });
+  
+  test("should return success true", function() {
+    expect(res.body.success).to.equal(true);
+  });
+  
+  test("should return data object", function() {
+    expect(res.body.data).to.be.an('object');
+  });
+  
+  test("should return profileName", function() {
+    expect(res.body.data.profileName).to.be.a('string');
+    expect(res.body.data.profileName).to.not.be.empty;
+  });
+  
+  test("should return conversationUrl", function() {
+    expect(res.body.data.conversationUrl).to.be.a('string');
+    expect(res.body.data.conversationUrl).to.include('linkedin.com/messaging');
+  });
+}
+
+docs {
+  # Get Conversation URL from Profile
+  
+  This endpoint retrieves the conversation URL for a LinkedIn profile.
+  
+  ## Functionality
+  1. Checks if the user is connected (1st degree)
+  2. If pending, waits for connection acceptance (up to 5 minutes)
+  3. Navigates to messaging and searches for the person in conversation list
+  4. Scrolls through conversations (up to 5 times) if not found initially
+  5. Returns the conversation URL
+  
+  ## Prerequisites
+  - Active session (must be logged in)
+  - Profile must be a 1st degree connection
+  - You must have an existing conversation with this person (at least one message exchanged)
+  
+  ## Query Parameters
+  - `sessionId`: Active session ID (from Initialize Session)
+  - `profileUrl`: Full LinkedIn profile URL (e.g., https://www.linkedin.com/in/username/)
+  
+  ## Response
+  ```json
+  {
+    "success": true,
+    "data": {
+      "profileName": "John Doe",
+      "conversationUrl": "https://www.linkedin.com/messaging/thread/2-xxx/"
+    }
+  }
+  ```
+  
+  ## Error Cases
+  - Not authenticated: Session not found or not logged in
+  - Not connected: User is not a 1st degree connection (must send connection request first)
+  - Timeout: Connection request not accepted within 5 minutes
+  - No conversation found: Person not found in messaging
+  
+  ## Usage Flow
+  1. Send connection request to a profile (if not already connected)
+  2. Call this endpoint with the profile URL
+  3. If pending, the endpoint waits automatically
+  4. Once accepted, it returns the conversation URL
+  5. Use the conversation URL with "Send Message" or "Read Conversation" endpoints
+  
+  ## Notes
+  - This endpoint may take up to 5 minutes if waiting for connection acceptance
+  - Replace `{{testProfileUrl}}` with the actual profile URL you want to test
+  - The profile must be a 1st degree connection or have a pending request
+}

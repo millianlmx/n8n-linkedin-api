@@ -218,19 +218,62 @@ export function extractUnreadConversations() {
 
 export function extractConversationMessages() {
   const messages: any[] = [];
-  const messageItems = document.querySelectorAll('.msg-s-message-list__event');
+  const messageListItems = document.querySelectorAll('.msg-s-message-list__event');
   
-  messageItems.forEach((item) => {
+  // Helper function to convert relative dates to actual dates
+  const convertRelativeDate = (dateStr: string): string => {
+    const normalized = dateStr.trim().toLowerCase();
+    
+    // Check for "Today" in various languages
+    if (normalized === "aujourd'hui" || normalized === 'today' || normalized === 'hoy') {
+      const today = new Date();
+      return formatDate(today);
+    }
+    
+    // Check for "Yesterday" in various languages
+    if (normalized === 'hier' || normalized === 'yesterday' || normalized === 'ayer') {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      return formatDate(yesterday);
+    }
+    
+    // Return original if not a relative date
+    return dateStr;
+  };
+  
+  // Helper function to format date as "29 oct."
+  const formatDate = (date: Date): string => {
+    const months = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 
+                    'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    return `${day} ${month}`;
+  };
+  
+  let currentDay = '';
+  
+  messageListItems.forEach((item) => {
+    // Check if this item contains a day heading
+    const dayHeadingEl = item.querySelector('.msg-s-message-list__time-heading');
+    if (dayHeadingEl) {
+      const rawDay = dayHeadingEl.textContent?.trim() || '';
+      currentDay = convertRelativeDate(rawDay);
+    }
+    
+    // Extract message content
     const messageEl = item.querySelector('.msg-s-event-listitem__message-bubble p');
     const message = messageEl?.textContent?.trim() || '';
     
     const senderEl = item.querySelector('.msg-s-message-group__name');
     const sender = senderEl?.textContent?.trim() || '';
     
-    const timestampEl = item.querySelector('.msg-s-message-group__timestamp');
-    const timestamp = timestampEl?.textContent?.trim() || '';
+    const timeEl = item.querySelector('.msg-s-message-group__timestamp');
+    const time = timeEl?.textContent?.trim() || '';
     
     if (message) {
+      // Combine day and time for full timestamp
+      const timestamp = currentDay ? `${currentDay} ${time}` : time;
+      
       messages.push({
         sender,
         message,
@@ -403,4 +446,105 @@ export function clickConversationItem(index: number) {
     }
   }
   return false;
+}
+
+// ============================================================================
+// CONNECTION STATUS FUNCTIONS
+// ============================================================================
+
+export function checkConnectionStatus() {
+  // Check if "En attente" (Pending) button exists
+  const pendingButton = document.querySelector('button[aria-label*="En attente"]') || 
+                        document.querySelector('button[aria-label*="Pending"]');
+  
+  if (pendingButton) {
+    return { status: 'pending', connected: false };
+  }
+  
+  // Check if user is 1st degree connection
+  const degreeEl = document.querySelector('.distance-badge .dist-value');
+  const degree = degreeEl?.textContent?.trim() || '';
+  
+  if (degree === '1er' || degree === '1st') {
+    return { status: 'connected', connected: true };
+  }
+  
+  // Check if connect button exists (not connected)
+  const connectButton = document.querySelector('button[aria-label*="Invitez"]') ||
+                        document.querySelector('button[aria-label*="Connect"]');
+  
+  if (connectButton) {
+    return { status: 'not_connected', connected: false };
+  }
+  
+  return { status: 'unknown', connected: false };
+}
+
+export function extractProfileName() {
+  const nameEl = document.querySelector('h1.inline.t-24.v-align-middle.break-words');
+  return nameEl?.textContent?.trim() || '';
+}
+
+export function findAndClickConversationByName(firstName: string, lastName: string) {
+  // Normalize search terms (lowercase, trim)
+  const searchFirstName = firstName.toLowerCase().trim();
+  const searchLastName = lastName.toLowerCase().trim();
+  const fullName = `${searchFirstName} ${searchLastName}`;
+  
+  // Helper function to search in current visible conversations
+  const searchInVisibleConversations = () => {
+    const conversationItems = Array.from(document.querySelectorAll('li.msg-conversation-listitem'));
+    
+    for (const item of conversationItems) {
+      // Get the participant name from the conversation card
+      const nameEl = item.querySelector('.msg-conversation-listitem__participant-names .truncate');
+      if (!nameEl) continue;
+      
+      const participantName = nameEl.textContent?.trim().toLowerCase() || '';
+      
+      // Check if the name matches (either "firstname lastname" or "lastname firstname")
+      const matchesFullName = participantName.includes(fullName);
+      const matchesReversed = participantName.includes(`${searchLastName} ${searchFirstName}`);
+      const matchesBoth = participantName.includes(searchFirstName) && participantName.includes(searchLastName);
+      
+      if (matchesFullName || matchesReversed || matchesBoth) {
+        // Click on the conversation link
+        const linkEl = item.querySelector('.msg-conversation-listitem__link') as HTMLElement;
+        if (linkEl) {
+          linkEl.click();
+          return { success: true, name: nameEl.textContent?.trim() };
+        }
+      }
+    }
+    
+    return null;
+  };
+  
+  // First attempt: search in currently visible conversations
+  const result = searchInVisibleConversations();
+  if (result) return result;
+  
+  // If not found, scroll and search up to 5 times
+  const conversationList = document.querySelector('.msg-conversations-container__conversations-list');
+  if (!conversationList) {
+    return { success: false, name: null };
+  }
+  
+  const maxScrollAttempts = 5;
+  for (let i = 0; i < maxScrollAttempts; i++) {
+    // Scroll to bottom of conversation list
+    conversationList.scrollTop = conversationList.scrollHeight;
+    
+    // Wait a bit for new conversations to load (using a simple busy wait)
+    const startTime = Date.now();
+    while (Date.now() - startTime < 1000) {
+      // Busy wait for 1 second
+    }
+    
+    // Search again in newly loaded conversations
+    const scrollResult = searchInVisibleConversations();
+    if (scrollResult) return scrollResult;
+  }
+  
+  return { success: false, name: null };
 }

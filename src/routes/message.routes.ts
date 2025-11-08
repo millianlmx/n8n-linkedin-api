@@ -121,4 +121,44 @@ router.post('/send', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/messages/conversation-url
+ * Get conversation URL from a LinkedIn profile URL
+ * Query: sessionId, profileUrl
+ * 
+ * This endpoint:
+ * 1. Checks if the user is connected (1st degree)
+ * 2. If pending, waits for connection acceptance (up to 5 minutes)
+ * 3. Navigates to messaging and searches for the person
+ * 4. Returns the conversation URL
+ */
+router.get('/conversation-url', async (req: Request, res: Response) => {
+  try {
+    const { sessionId, profileUrl } = req.query;
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required',
+      });
+    }
+
+    if (!profileUrl || typeof profileUrl !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Profile URL is required',
+      });
+    }
+
+    const result = await LinkedInService.getConversationUrlFromProfile(sessionId, profileUrl);
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 export default router;

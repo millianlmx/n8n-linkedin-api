@@ -67,6 +67,12 @@ export class Messaging implements INodeType {
 						description: 'Send a message in a conversation',
 						action: 'Send a message',
 					},
+					{
+						name: 'Get Conversation URL',
+						value: 'getConversationUrl',
+						description: 'Get conversation URL from a profile URL',
+						action: 'Get conversation URL from profile',
+					},
 				],
 				default: 'listConversations',
 			},
@@ -84,6 +90,21 @@ export class Messaging implements INodeType {
 				},
 				description: 'The LinkedIn conversation URL',
 				placeholder: 'https://www.linkedin.com/messaging/thread/...',
+			},
+			// Get Conversation URL fields
+			{
+				displayName: 'Profile URL',
+				name: 'profileUrl',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: {
+					show: {
+						operation: ['getConversationUrl'],
+					},
+				},
+				description: 'The LinkedIn profile URL to get conversation for',
+				placeholder: 'https://www.linkedin.com/in/username/',
 			},
 			// Send Message fields
 			{
@@ -191,6 +212,23 @@ export class Messaging implements INodeType {
 							sessionId,
 							conversationId,
 							message,
+						},
+						json: true,
+					});
+
+					responseData = response;
+				} else if (operation === 'getConversationUrl') {
+					const profileUrl = this.getNodeParameter('profileUrl', i) as string;
+
+					const response = await this.helpers.httpRequest({
+						method: 'GET',
+						url: `${baseUrl}/api/messages/conversation-url`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						qs: {
+							sessionId,
+							profileUrl,
 						},
 						json: true,
 					});
