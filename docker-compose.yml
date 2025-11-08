@@ -24,6 +24,8 @@ services:
     restart: unless-stopped
     depends_on:
       - linkedin-db
+    profiles:
+      - production
     networks:
       - linkedin-network
 
@@ -42,17 +44,16 @@ services:
       - N8N_TRUST_PROXY=${N8N_PROXY:-}
       - NODE_ENV=production
       - NODE_FUNCTION_ALLOW_EXTERNAL=${EXTERNAL:-'uuid,cheerio'}
-      - WEBHOOK_URL=${N8N_PROTOCOL:-http}://${N8N_HOST:-localhost}:${N8N_PORT:-5678}/
+      - WEBHOOK_URL=${N8N_PROTOCOL:-http}://${N8N_HOST:-localhost}$([[ "${N8N_HOST}" != "localhost" ]] && echo ":${N8N_PORT:-5678}" || echo "")/
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Europe/Paris}
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
       - N8N_COMMUNITY_PACKAGES_ENABLED=true
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n_custom_nodes:/home/node/.n8n/custom
-    depends_on:
-      api:
-        condition: service_started
-        required: false
+    profiles:
+      - development
+      - production
     restart: unless-stopped
     networks:
       - linkedin-network
@@ -70,6 +71,9 @@ services:
     ports:
       - "5432:5432"
     restart: unless-stopped
+    profiles:
+      - production
+      - development
     networks:
       - linkedin-network
 
