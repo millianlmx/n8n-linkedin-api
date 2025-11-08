@@ -33,16 +33,16 @@ services:
       dockerfile: ./Dockerfile.patched.n8n
     container_name: n8n
     ports:
-      - "${PORT}:5678"
+      - "${N8N_PORT}:5678"
     environment:
-      - N8N_HOST=${HOST:-localhost}
-      - N8N_PORT=${PORT:-5678}
-      - N8N_PROTOCOL=${PROTOCOL:-http}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=${N8N_PORT:-5678}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
       - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true # Allow AI nodes to use custom linkedin nodes as tool
-      - N8N_TRUST_PROXY=${PROXY:-}
+      - N8N_TRUST_PROXY=${N8N_PROXY:-}
       - NODE_ENV=production
       - NODE_FUNCTION_ALLOW_EXTERNAL=${EXTERNAL:-'uuid,cheerio'}
-      - WEBHOOK_URL=${PROTOCOL:-http}://${HOST:-localhost}:${PORT:-5678}/
+      - WEBHOOK_URL=${N8N_PROTOCOL:-http}://${N8N_HOST:-localhost}:${N8N_PORT:-5678}/
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Europe/Paris}
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
       - N8N_COMMUNITY_PACKAGES_ENABLED=true
