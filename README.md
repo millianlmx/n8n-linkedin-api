@@ -24,7 +24,7 @@ cp .env.example .env
 cd n8n_custom_nodes && npm install && npm run build && cd ..
 
 # 4. Start with Docker/Podman
-podman compose up -d
+COMPOSE_PROFILES=production podman compose up -d
 
 # 5. Access the API
 # API: http://localhost:8080
