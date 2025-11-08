@@ -1,9 +1,5 @@
 # Custom LinkedIn Automation with Puppeteer
 
-## ✅ Built from Scratch!
-
-We've replaced the third-party `auto-linkedin` module with our own custom implementation using pure Puppeteer.
-
 ## Architecture
 
 ### Core Components
