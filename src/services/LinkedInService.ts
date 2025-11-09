@@ -906,12 +906,12 @@ class LinkedInService {
       console.log(`  Connection status: ${connectionStatus.status}`);
 
       // If pending, wait for connection to be accepted
-      // if (connectionStatus.status === 'pending') {
-      //   console.log('  ⏳ Connection request is pending. Waiting for acceptance...');
-      //   throw new Error('Connection request was not accepted');
-      // } else if (!connectionStatus.connected) {
-      //   throw new Error('User is not connected. Please send a connection request first.');
-      // }
+      if (connectionStatus.status === 'pending') {
+        console.log('  ⏳ Connection request is pending. Waiting for acceptance...');
+        throw new Error('Connection request was not accepted');
+      } else if (!connectionStatus.connected) {
+        throw new Error('User is not connected. Please send a connection request first.');
+      }
 
       // Extract profile name
       const profileName = await page.evaluate(DOMFunctions.extractProfileName);
