@@ -589,7 +589,7 @@ describe('LinkedInService', () => {
       // Execution & Assertion
       await expect(
         linkedInService.sendMessage('test-session-id', { 
-          conversationId: '123', 
+          conversationUrl: '123', 
           message: 'Hello' 
         })
       ).rejects.toThrow('Not authenticated');
@@ -601,7 +601,7 @@ describe('LinkedInService', () => {
 
       // Execution
       await linkedInService.sendMessage('test-session-id', { 
-        conversationId: '123', 
+        conversationUrl: '123', 
         message: 'Hello' 
       });
 
@@ -615,7 +615,7 @@ describe('LinkedInService', () => {
 
       // Execution
       await linkedInService.sendMessage('test-session-id', { 
-        conversationId: '123', 
+        conversationUrl: '123', 
         message: 'Test message' 
       });
 
@@ -630,7 +630,7 @@ describe('LinkedInService', () => {
 
       // Execution
       const result = await linkedInService.sendMessage('test-session-id', { 
-        conversationId: '123', 
+        conversationUrl: '123', 
         message: 'Hello' 
       });
 
@@ -644,7 +644,7 @@ describe('LinkedInService', () => {
 
       // Execution & Assertion
       await expect(
-        linkedInService.sendMessage('test-session-id', { conversationId: '123', message: 'Hello' })
+        linkedInService.sendMessage('test-session-id', { conversationUrl: '123', message: 'Hello' })
       ).rejects.toThrow();
     });
   });
@@ -1076,7 +1076,7 @@ describe('LinkedInService', () => {
       mockPage.$.mockResolvedValueOnce({ click: jest.fn() }); // Send button found
 
       const result = await linkedInService.sendMessage('test-session-id', {
-        conversationId: '123',
+        conversationUrl: '123',
         message: 'Test message'
       });
 
@@ -1090,7 +1090,7 @@ describe('LinkedInService', () => {
         .mockResolvedValueOnce({ click: jest.fn() }); // Second selector works
 
       const result = await linkedInService.sendMessage('test-session-id', {
-        conversationId: '123',
+        conversationUrl: '123',
         message: 'Test'
       });
 
@@ -1104,7 +1104,7 @@ describe('LinkedInService', () => {
 
       await expect(
         linkedInService.sendMessage('test-session-id', {
-          conversationId: '123',
+          conversationUrl: '123',
           message: 'Test'
         })
       ).rejects.toThrow('Could not find or click send button');
@@ -1115,7 +1115,7 @@ describe('LinkedInService', () => {
 
       await expect(
         linkedInService.sendMessage('test-session-id', {
-          conversationId: '123',
+          conversationUrl: '123',
           message: 'Test'
         })
       ).rejects.toThrow();
