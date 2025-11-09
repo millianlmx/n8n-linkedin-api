@@ -31,7 +31,7 @@ export interface ConnectRequest {
 }
 
 export interface SendMessageRequest {
-  conversationId: string;
+  conversationUrl: string;
   message: string;
 }
 

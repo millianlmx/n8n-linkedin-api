@@ -460,12 +460,8 @@ class LinkedInService {
     try {
       console.log(`📖 Reading conversation: ${conversationUrl}`);
       
-      // Navigate to the conversation
-      const fullUrl = conversationUrl.startsWith('http') 
-        ? conversationUrl 
-        : `https://www.linkedin.com${conversationUrl}`;
-        
-      await page.goto(fullUrl, {
+      // Navigate to the conversation (conversationUrl is always a full URL)
+      await page.goto(conversationUrl, {
         waitUntil: 'networkidle2',
         timeout: 30000,
       });
@@ -526,12 +522,10 @@ class LinkedInService {
     const { page } = session;
 
     try {
-      console.log(`💬 Sending message to: ${request.conversationId}`);
+      console.log(`💬 Sending message to: ${request.conversationUrl}`);
       
       // Navigate to the conversation
-      const fullUrl = request.conversationId.startsWith('http') 
-        ? request.conversationId 
-        : `https://www.linkedin.com${request.conversationId}`;
+      const fullUrl = request.conversationUrl;
         
       await page.goto(fullUrl, {
         waitUntil: 'networkidle2',

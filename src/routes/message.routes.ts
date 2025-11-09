@@ -80,6 +80,15 @@ router.get('/conversation', async (req: Request, res: Response) => {
       });
     }
 
+    // Validate conversationUrl is a proper LinkedIn messaging URL
+    if (!conversationUrl.startsWith('https://www.linkedin.com/messaging/thread/') && 
+        !conversationUrl.startsWith('https://linkedin.com/messaging/thread/')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid conversation URL. Must be a LinkedIn messaging thread URL',
+      });
+    }
+
     const profileUrlStr = profileUrl && typeof profileUrl === 'string' ? profileUrl : undefined;
     const forceRefreshBool = forceRefresh === 'true' || forceRefresh === '1';
     const result = await LinkedInService.readConversation(sessionId, conversationUrl, profileUrlStr, forceRefreshBool);
@@ -96,21 +105,30 @@ router.get('/conversation', async (req: Request, res: Response) => {
 /**
  * POST /api/messages/send
  * Send a message to a conversation
- * Body: { sessionId: string, conversationId: string, message: string }
+ * Body: { sessionId: string, conversationUrl: string, message: string }
  */
 router.post('/send', async (req: Request, res: Response) => {
   try {
-    const { sessionId, conversationId, message } = req.body;
+    const { sessionId, conversationUrl, message } = req.body;
 
-    if (!sessionId || !conversationId || !message) {
+    if (!sessionId || !conversationUrl || !message) {
       return res.status(400).json({
         success: false,
-        message: 'Session ID, conversation ID, and message are required',
+        message: 'Session ID, conversation URL, and message are required',
+      });
+    }
+
+    // Validate conversationUrl is a proper LinkedIn messaging URL
+    if (!conversationUrl.startsWith('https://www.linkedin.com/messaging/thread/') && 
+        !conversationUrl.startsWith('https://linkedin.com/messaging/thread/')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid conversation URL. Must be a LinkedIn messaging thread URL',
       });
     }
 
     const result = await LinkedInService.sendMessage(sessionId, {
-      conversationId,
+      conversationUrl,
       message,
     });
 

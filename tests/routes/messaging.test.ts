@@ -220,6 +220,19 @@ describe('Messaging API', () => {
       expect(response.body).toEqual({ success: false, message: 'Conversation URL is required' });
     });
 
+    it('should return a 400 error when conversationUrl is invalid', async () => {
+      // Setup - invalid conversationUrl
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/conversation')
+        .query({ sessionId: 'session123', conversationUrl: 'invalid-url' });
+
+      // Assertion
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ success: false, message: 'Invalid conversation URL. Must be a LinkedIn messaging thread URL' });
+    });
+
     it('should handle errors when reading conversation', async () => {
       // Setup
       mockedLinkedInService.readConversation.mockRejectedValue(new Error('Conversation not found'));
@@ -240,7 +253,7 @@ describe('Messaging API', () => {
       // Setup
       const messageData = {
         sessionId: 'session123',
-        conversationId: 'https://linkedin.com/messaging/thread/123',
+        conversationUrl: 'https://linkedin.com/messaging/thread/123',
         message: 'Test message'
       };
       mockedLinkedInService.sendMessage.mockResolvedValue({ success: true, message: 'Message sent' } as any);
@@ -254,7 +267,7 @@ describe('Messaging API', () => {
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, message: 'Message sent' });
       expect(mockedLinkedInService.sendMessage).toHaveBeenCalledWith('session123', {
-        conversationId: messageData.conversationId,
+        conversationUrl: messageData.conversationUrl,
         message: messageData.message
       });
     });
@@ -265,15 +278,15 @@ describe('Messaging API', () => {
       // Execution
       const response = await request(app)
         .post('/api/messages/send')
-        .send({ conversationId: 'thread123', message: 'Test' });
+        .send({ conversationUrl: 'thread123', message: 'Test' });
 
       // Assertion
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation ID, and message are required' });
+      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation URL, and message are required' });
     });
 
-    it('should return a 400 error when conversationId is missing', async () => {
-      // Setup - no conversationId provided
+    it('should return a 400 error when conversationUrl is missing', async () => {
+      // Setup - no conversationUrl provided
 
       // Execution
       const response = await request(app)
@@ -282,7 +295,7 @@ describe('Messaging API', () => {
 
       // Assertion
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation ID, and message are required' });
+      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation URL, and message are required' });
     });
 
     it('should return a 400 error when message is missing', async () => {
@@ -291,11 +304,24 @@ describe('Messaging API', () => {
       // Execution
       const response = await request(app)
         .post('/api/messages/send')
-        .send({ sessionId: 'session123', conversationId: 'thread123' });
+        .send({ sessionId: 'session123', conversationUrl: 'https://linkedin.com/messaging/thread/123' });
 
       // Assertion
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation ID, and message are required' });
+      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation URL, and message are required' });
+    });
+
+    it('should return a 400 error when conversationUrl is invalid', async () => {
+      // Setup - invalid conversationUrl
+
+      // Execution
+      const response = await request(app)
+        .post('/api/messages/send')
+        .send({ sessionId: 'session123', conversationUrl: 'invalid-url', message: 'Test' });
+
+      // Assertion
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ success: false, message: 'Invalid conversation URL. Must be a LinkedIn messaging thread URL' });
     });
 
     it('should handle errors when sending message', async () => {
@@ -305,7 +331,7 @@ describe('Messaging API', () => {
       // Execution
       const response = await request(app)
         .post('/api/messages/send')
-        .send({ sessionId: 'session123', conversationId: 'thread123', message: 'Test' });
+        .send({ sessionId: 'session123', conversationUrl: 'https://linkedin.com/messaging/thread/123', message: 'Test' });
 
       // Assertion
       expect(response.status).toBe(500);

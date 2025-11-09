@@ -122,7 +122,7 @@ OpenAI (Generate response)
   ↓
 LinkedIn Messaging (Send Message)
   - Session ID: ={{$json.sessionId}}
-  - Conversation ID: ={{$json.conversationId}}
+  - Conversation URL: ={{$json.conversationUrl}}
   - Message: ={{$json.aiResponse}}
   ↓
 Slack (Notify)

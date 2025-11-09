@@ -196,7 +196,9 @@ GET /api/messages/conversation?sessionId=uuid-string&conversationUrl=https://www
 ```
 **Parameters:**
 - `sessionId`: Your session ID (required)
-- `conversationUrl`: The specific conversation URL (get this from List Conversations) (required)
+- `conversationUrl`: Full LinkedIn messaging thread URL (required)
+  - Format: `https://www.linkedin.com/messaging/thread/{threadId}`
+  - Get this from List Conversations endpoint
 - `profileUrl`: LinkedIn profile URL for caching (optional, recommended)
 - `forceRefresh`: Bypass cache and fetch fresh data (optional, default: `false`)
 
@@ -254,10 +256,16 @@ Content-Type: application/json
 
 {
   "sessionId": "uuid-string",
-  "conversationId": "https://www.linkedin.com/messaging/thread/2-ABC123",
+  "conversationUrl": "https://www.linkedin.com/messaging/thread/2-ABC123",
   "message": "Hello!"
 }
 ```
+
+**Parameters:**
+- `sessionId`: Your session ID (required)
+- `conversationUrl`: Full LinkedIn messaging thread URL (required)
+  - Format: `https://www.linkedin.com/messaging/thread/{threadId}`
+- `message`: The message text to send (required)
 
 ---
 

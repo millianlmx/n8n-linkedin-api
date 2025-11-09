@@ -118,7 +118,7 @@ The following nodes will be available in your n8n workflow editor:
   - **Force Refresh**: Set to true to bypass cache and fetch fresh data
 
 - **Send Message**: Send a message
-  - Inputs: Conversation ID, Message
+  - Inputs: Conversation URL, Message
   - Output: Success status
 
 #### LinkedIn Search Node

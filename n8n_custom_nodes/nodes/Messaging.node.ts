@@ -133,8 +133,8 @@ export class Messaging implements INodeType {
 			},
 			// Send Message fields
 			{
-				displayName: 'Conversation ID',
-				name: 'conversationId',
+				displayName: 'Conversation URL',
+				name: 'conversationUrl',
 				type: 'string',
 				default: '',
 				required: true,
@@ -143,7 +143,8 @@ export class Messaging implements INodeType {
 						operation: ['sendMessage'],
 					},
 				},
-				description: 'The conversation ID to send the message to',
+				description: 'The LinkedIn conversation URL to send the message to',
+				placeholder: 'https://www.linkedin.com/messaging/thread/...',
 			},
 			{
 				displayName: 'Message',
@@ -236,7 +237,7 @@ export class Messaging implements INodeType {
 
 					responseData = response;
 				} else if (operation === 'sendMessage') {
-					const conversationId = this.getNodeParameter('conversationId', i) as string;
+					const conversationUrl = this.getNodeParameter('conversationUrl', i) as string;
 					const message = this.getNodeParameter('message', i) as string;
 
 					const response = await this.helpers.httpRequest({
@@ -247,7 +248,7 @@ export class Messaging implements INodeType {
 						},
 						body: {
 							sessionId,
-							conversationId,
+							conversationUrl,
 							message,
 						},
 						json: true,
