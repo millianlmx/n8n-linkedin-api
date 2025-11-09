@@ -37,7 +37,12 @@ docs {
   
   The forceRefresh parameter is optional (default: false):
   - Set to 'true' or '1' to bypass cache and fetch fresh data from LinkedIn
-  - Fresh data will automatically update the cache
-  - Use when you need the most up-to-date conversation messages
+  - Smart update: Only updates cache if new messages are detected
+  - Use when you need to check for the most up-to-date conversation messages
   - Example: forceRefresh=true
+  
+  Response includes:
+  - cached: true if data came from cache, false if fetched from LinkedIn
+  - cacheUpdated: true if the database was updated (new messages detected)
+  - When forceRefresh=true and no changes: cacheUpdated=false (saves DB writes)
 }

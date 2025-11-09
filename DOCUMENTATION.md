@@ -222,13 +222,24 @@ Set `forceRefresh=true` or `forceRefresh=1` to bypass the cache and fetch fresh 
       "timestamp": "2024-01-01T10:01:00Z"
     }
   ],
-  "cached": false
+  "cached": false,
+  "cacheUpdated": true
 }
 ```
 
+**Response Fields:**
+- `success`: Whether the operation was successful
+- `data`: Array of conversation messages
+- `cached`: Whether the data was retrieved from cache (`true`) or fetched from LinkedIn (`false`)
+- `cacheUpdated`: Whether the database cache was updated during this request (`true` when fresh data was cached, `false` when returning cached data)
+
 **Notes:** 
-- The `cached` field indicates whether the data was retrieved from cache (`true`) or fetched from LinkedIn (`false`)
-- When `forceRefresh=true`, `cached` will always be `false` and the cache will be updated with fresh data
+- **Smart Cache Updates**: When `forceRefresh=true`, the API compares fresh data with cached data:
+  - If changes detected: `cached=false`, `cacheUpdated=true` (cache updated)
+  - If no changes: `cached=false`, `cacheUpdated=false` (cache not updated)
+- When returning cached data: `cached=true`, `cacheUpdated=false`
+- When fetching fresh data (cache miss) with `profileUrl`: `cached=false`, `cacheUpdated=true`
+- This prevents unnecessary database writes when data hasn't changed
 - **Date Conversion**: The API automatically converts relative dates to actual dates:
   - "Today" / "Aujourd'hui" → "8 nov."
   - "Yesterday" / "Hier" → "7 nov."

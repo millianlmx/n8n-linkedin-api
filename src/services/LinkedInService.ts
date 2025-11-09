@@ -447,12 +447,12 @@ class LinkedInService {
       
       if (cachedConversation) {
         console.log(`✅ Cache hit! Returning cached conversation\n`);
-        return { success: true, data: cachedConversation, cached: true };
+        return { success: true, data: cachedConversation, cached: true, cacheUpdated: false };
       }
       
       console.log(`❌ Cache miss. Fetching conversation from LinkedIn...\n`);
     } else if (forceRefresh && profileUrl) {
-      console.log(`🔄 Force refresh enabled. Bypassing cache and fetching from LinkedIn...\n`);
+      console.log(`🔄 Force refresh enabled. Fetching from LinkedIn to check for updates...\n`);
     }
 
     const { page } = session;
@@ -478,15 +478,39 @@ class LinkedInService {
 
       console.log(`✅ Successfully read conversation with ${messages.length} messages\n`);
       
+      // Track if cache was updated
+      let cacheUpdated = false;
+      
       // Cache the conversation if profileUrl is provided
       if (profileUrl) {
-        await this.cacheService.cacheConversation(profileUrl, messages);
+        // If force refresh, check if data has changed before updating cache
         if (forceRefresh) {
-          console.log(`💾 Cache updated with fresh data\n`);
+          const cachedConversation = await this.cacheService.getConversation(profileUrl);
+          
+          // Compare fresh data with cached data
+          const hasChanges = !cachedConversation || 
+                            JSON.stringify(cachedConversation) !== JSON.stringify(messages);
+          
+          if (hasChanges) {
+            await this.cacheService.cacheConversation(profileUrl, messages);
+            cacheUpdated = true;
+            if (cachedConversation) {
+              console.log(`💾 Cache updated - new messages detected (${messages.length} messages)\n`);
+            } else {
+              console.log(`💾 Cache created with fresh data (${messages.length} messages)\n`);
+            }
+          } else {
+            console.log(`✓ No changes detected - cache not updated (${messages.length} messages)\n`);
+          }
+        } else {
+          // Normal cache miss - always cache
+          await this.cacheService.cacheConversation(profileUrl, messages);
+          cacheUpdated = true;
+          console.log(`💾 Conversation cached for future requests (${messages.length} messages)\n`);
         }
       }
       
-      return { success: true, data: messages, cached: false };
+      return { success: true, data: messages, cached: false, cacheUpdated };
     } catch (error: any) {
       console.error('❌ Failed to read conversation:', error.message);
       throw new Error(`Failed to read conversation: ${error.message}`);
