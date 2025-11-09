@@ -44,7 +44,7 @@ services:
       - N8N_TRUST_PROXY=${N8N_PROXY:-}
       - NODE_ENV=production
       - NODE_FUNCTION_ALLOW_EXTERNAL=${EXTERNAL:-'uuid,cheerio'}
-      - WEBHOOK_URL=${N8N_PROTOCOL:-http}://${N8N_HOST:-localhost}$([[ "${N8N_HOST}" != "localhost" ]] && echo ":${N8N_PORT:-5678}" || echo "")/
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-${N8N_PROTOCOL:-http}://${N8N_HOST:-localhost}:5678/}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Europe/Paris}
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
       - N8N_COMMUNITY_PACKAGES_ENABLED=true
