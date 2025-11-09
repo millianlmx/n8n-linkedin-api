@@ -192,11 +192,19 @@ GET /api/messages/conversations?sessionId=uuid-string
 #### Read Conversation
 **Reads messages from ONE specific conversation only**
 ```http
-GET /api/messages/conversation?sessionId=uuid-string&conversationUrl=https://www.linkedin.com/messaging/thread/2-ABC123
+GET /api/messages/conversation?sessionId=uuid-string&conversationUrl=https://www.linkedin.com/messaging/thread/2-ABC123&profileUrl=https://www.linkedin.com/in/john-doe/&forceRefresh=true
 ```
 **Parameters:**
-- `sessionId`: Your session ID
-- `conversationUrl`: The specific conversation URL (get this from List Conversations)
+- `sessionId`: Your session ID (required)
+- `conversationUrl`: The specific conversation URL (get this from List Conversations) (required)
+- `profileUrl`: LinkedIn profile URL for caching (optional, recommended)
+- `forceRefresh`: Bypass cache and fetch fresh data (optional, default: `false`)
+
+**Caching:**
+When `profileUrl` is provided, the conversation is cached in PostgreSQL using the profile URL as the primary key. Subsequent requests with the same `profileUrl` will return cached data, improving performance and reducing LinkedIn API calls.
+
+**Force Refresh:**
+Set `forceRefresh=true` or `forceRefresh=1` to bypass the cache and fetch fresh data from LinkedIn. The fresh data will automatically update the cache. Use this when you need the most up-to-date conversation messages.
 
 **Response:**
 ```json
@@ -213,9 +221,19 @@ GET /api/messages/conversation?sessionId=uuid-string&conversationUrl=https://www
       "message": "Hi there!",
       "timestamp": "2024-01-01T10:01:00Z"
     }
-  ]
+  ],
+  "cached": false
 }
 ```
+
+**Notes:** 
+- The `cached` field indicates whether the data was retrieved from cache (`true`) or fetched from LinkedIn (`false`)
+- When `forceRefresh=true`, `cached` will always be `false` and the cache will be updated with fresh data
+- **Date Conversion**: The API automatically converts relative dates to actual dates:
+  - "Today" / "Aujourd'hui" → "8 nov."
+  - "Yesterday" / "Hier" → "7 nov."
+  - Weekday names (e.g., "lundi", "Monday") → Actual date (e.g., "4 nov.")
+  - Supports French, English, and Spanish date formats
 
 #### Send Message
 **Sends a message to a specific conversation**
@@ -294,6 +312,7 @@ Client → Express API → LinkedInService → linvo-scraper → Puppeteer → L
 **Services** (`src/services/`)
 - `LinkedInService.ts` - Core LinkedIn operations
 - `SessionManager.ts` - Browser session management
+- `CacheService.ts` - PostgreSQL caching layer
 
 **Session Management**
 - UUID-based sessions
@@ -301,10 +320,19 @@ Client → Express API → LinkedInService → linvo-scraper → Puppeteer → L
 - Auto-cleanup every 10 minutes
 - Multiple concurrent sessions supported
 
+**Caching System**
+- PostgreSQL database for persistent caching
+- Two cache tables:
+  - `linkedin_profiles` - Cached profile data (keyed by profile URL)
+  - `linkedin_conversations` - Cached conversation messages (keyed by profile URL)
+- Automatic cache updates on data fetch
+- Reduces LinkedIn API calls and improves performance
+
 ### Technology Stack
 - **Backend**: Express.js + TypeScript
 - **Browser**: Puppeteer
 - **LinkedIn**: linvo-scraper
+- **Database**: PostgreSQL (for caching)
 - **Sessions**: UUID
 
 ---

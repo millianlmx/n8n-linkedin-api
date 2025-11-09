@@ -60,11 +60,11 @@ router.get('/unread', async (req: Request, res: Response) => {
 /**
  * GET /api/messages/conversation
  * Read a specific conversation
- * Query: sessionId, conversationUrl
+ * Query: sessionId, conversationUrl, profileUrl (optional, for caching), forceRefresh (optional, bypass cache)
  */
 router.get('/conversation', async (req: Request, res: Response) => {
   try {
-    const { sessionId, conversationUrl } = req.query;
+    const { sessionId, conversationUrl, profileUrl, forceRefresh } = req.query;
 
     if (!sessionId || typeof sessionId !== 'string') {
       return res.status(400).json({
@@ -80,7 +80,9 @@ router.get('/conversation', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.readConversation(sessionId, conversationUrl);
+    const profileUrlStr = profileUrl && typeof profileUrl === 'string' ? profileUrl : undefined;
+    const forceRefreshBool = forceRefresh === 'true' || forceRefresh === '1';
+    const result = await LinkedInService.readConversation(sessionId, conversationUrl, profileUrlStr, forceRefreshBool);
 
     res.json(result);
   } catch (error: any) {

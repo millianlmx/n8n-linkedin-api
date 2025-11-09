@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/api/messages/conversation?sessionId={{sessionId}}&conversationUrl=https://www.linkedin.com/messaging/thread/2-NTdhM2I5MzktOGMwZC00ZTU5LWE1MDEtZGUyMjJmMWQyOGE3XzEwMA==/
+  url: {{baseUrl}}/api/messages/conversation?sessionId={{sessionId}}&conversationUrl=https://www.linkedin.com/messaging/thread/2-NTdhM2I5MzktOGMwZC00ZTU5LWE1MDEtZGUyMjJmMWQyOGE3XzEwMA==/&profileUrl=https://www.linkedin.com/in/example-profile/&forceRefresh=false
   body: none
   auth: none
 }
@@ -13,6 +13,8 @@ get {
 params:query {
   sessionId: {{sessionId}}
   conversationUrl: https://www.linkedin.com/messaging/thread/2-NTdhM2I5MzktOGMwZC00ZTU5LWE1MDEtZGUyMjJmMWQyOGE3XzEwMA==/
+  profileUrl: https://www.linkedin.com/in/example-profile/
+  forceRefresh: false
 }
 
 tests {
@@ -26,5 +28,16 @@ tests {
 }
 
 docs {
-  Replace CONVERSATION_ID with an actual conversation URL from List Conversations
+  Replace CONVERSATION_ID with an actual conversation URL from List Conversations.
+  
+  The profileUrl parameter is optional but recommended for caching:
+  - If provided, the conversation will be cached using the LinkedIn profile URL as the primary key
+  - Subsequent requests with the same profileUrl will return cached data
+  - This improves performance and reduces LinkedIn API calls
+  
+  The forceRefresh parameter is optional (default: false):
+  - Set to 'true' or '1' to bypass cache and fetch fresh data from LinkedIn
+  - Fresh data will automatically update the cache
+  - Use when you need the most up-to-date conversation messages
+  - Example: forceRefresh=true
 }

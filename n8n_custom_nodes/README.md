@@ -109,8 +109,13 @@ The following nodes will be available in your n8n workflow editor:
   - Output: List of unread messages
 
 - **Read Conversation**: Read a specific conversation
-  - Input: Conversation URL
-  - Output: Conversation messages
+  - Inputs: 
+    - Conversation URL (required)
+    - Profile URL for caching (optional, recommended)
+    - Force Refresh (optional, default: false)
+  - Output: Conversation messages with `cached` indicator
+  - **Caching**: When Profile URL is provided, conversations are cached in PostgreSQL
+  - **Force Refresh**: Set to true to bypass cache and fetch fresh data
 
 - **Send Message**: Send a message
   - Inputs: Conversation ID, Message

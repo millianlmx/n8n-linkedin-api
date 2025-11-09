@@ -237,6 +237,33 @@ export function extractConversationMessages() {
       return formatDate(yesterday);
     }
     
+    // Check for weekday names (French, English, Spanish)
+    const weekdays = {
+      // French
+      'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4, 'vendredi': 5, 'samedi': 6, 'dimanche': 0,
+      // English
+      'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5, 'saturday': 6, 'sunday': 0,
+      // Spanish
+      'lunes': 1, 'martes': 2, 'miércoles': 3, 'jueves': 4, 'viernes': 5, 'sábado': 6, 'domingo': 0
+    };
+    
+    const targetDay = weekdays[normalized as keyof typeof weekdays];
+    if (targetDay !== undefined) {
+      const today = new Date();
+      const currentDay = today.getDay();
+      
+      // Calculate days difference (going backwards in time)
+      let daysDiff = currentDay - targetDay;
+      if (daysDiff <= 0) {
+        // If target day is today or in the future, go back a week
+        daysDiff += 7;
+      }
+      
+      const targetDate = new Date(today);
+      targetDate.setDate(today.getDate() - daysDiff);
+      return formatDate(targetDate);
+    }
+    
     // Return original if not a relative date
     return dateStr;
   };

@@ -8,6 +8,7 @@ import SessionManager from '../../src/services/SessionManager';
 
 jest.mock('../../src/services/LinkedInService');
 jest.mock('../../src/services/SessionManager');
+jest.mock('../../src/services/CacheService');
 
 const app = express();
 app.use(express.json());
@@ -100,7 +101,78 @@ describe('Messaging API', () => {
       // Assertion
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockMessages });
-      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl);
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, undefined, false);
+    });
+
+    it('should read messages from a conversation with profileUrl for caching', async () => {
+      // Setup
+      const mockMessages = [{ sender: 'Test User', message: 'Hello!', timestamp: '2023-01-01' }];
+      const conversationUrl = 'https://linkedin.com/messaging/thread/123';
+      const profileUrl = 'https://www.linkedin.com/in/test-user/';
+      mockedLinkedInService.readConversation.mockResolvedValue({ success: true, data: mockMessages, cached: false } as any);
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/conversation')
+        .query({ sessionId: 'session123', conversationUrl, profileUrl });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockMessages, cached: false });
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, profileUrl, false);
+    });
+
+    it('should return cached conversation when available', async () => {
+      // Setup
+      const mockMessages = [{ sender: 'Test User', message: 'Hello!', timestamp: '2023-01-01' }];
+      const conversationUrl = 'https://linkedin.com/messaging/thread/123';
+      const profileUrl = 'https://www.linkedin.com/in/test-user/';
+      mockedLinkedInService.readConversation.mockResolvedValue({ success: true, data: mockMessages, cached: true } as any);
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/conversation')
+        .query({ sessionId: 'session123', conversationUrl, profileUrl });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockMessages, cached: true });
+      expect(response.body.cached).toBe(true);
+    });
+
+    it('should force refresh and bypass cache when forceRefresh is true', async () => {
+      // Setup
+      const mockMessages = [{ sender: 'Test User', message: 'Fresh data!', timestamp: '2023-01-02' }];
+      const conversationUrl = 'https://linkedin.com/messaging/thread/123';
+      const profileUrl = 'https://www.linkedin.com/in/test-user/';
+      mockedLinkedInService.readConversation.mockResolvedValue({ success: true, data: mockMessages, cached: false } as any);
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/conversation')
+        .query({ sessionId: 'session123', conversationUrl, profileUrl, forceRefresh: 'true' });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockMessages, cached: false });
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, profileUrl, true);
+    });
+
+    it('should force refresh with forceRefresh=1', async () => {
+      // Setup
+      const mockMessages = [{ sender: 'Test User', message: 'Fresh data!', timestamp: '2023-01-02' }];
+      const conversationUrl = 'https://linkedin.com/messaging/thread/123';
+      const profileUrl = 'https://www.linkedin.com/in/test-user/';
+      mockedLinkedInService.readConversation.mockResolvedValue({ success: true, data: mockMessages, cached: false } as any);
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/conversation')
+        .query({ sessionId: 'session123', conversationUrl, profileUrl, forceRefresh: '1' });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, profileUrl, true);
     });
 
     it('should return a 400 error when sessionId is missing', async () => {

@@ -91,6 +91,31 @@ export class Messaging implements INodeType {
 				description: 'The LinkedIn conversation URL',
 				placeholder: 'https://www.linkedin.com/messaging/thread/...',
 			},
+			{
+				displayName: 'Profile URL (for caching)',
+				name: 'profileUrlForCache',
+				type: 'string',
+				default: '',
+				displayOptions: {
+					show: {
+						operation: ['readConversation'],
+					},
+				},
+				description: 'LinkedIn profile URL to use as cache key (optional but recommended)',
+				placeholder: 'https://www.linkedin.com/in/username/',
+			},
+			{
+				displayName: 'Force Refresh',
+				name: 'forceRefresh',
+				type: 'boolean',
+				default: false,
+				displayOptions: {
+					show: {
+						operation: ['readConversation'],
+					},
+				},
+				description: 'Whether to bypass cache and fetch fresh data from LinkedIn',
+			},
 			// Get Conversation URL fields
 			{
 				displayName: 'Profile URL',
@@ -183,6 +208,21 @@ export class Messaging implements INodeType {
 					responseData = response;
 				} else if (operation === 'readConversation') {
 					const conversationUrl = this.getNodeParameter('conversationUrl', i) as string;
+					const profileUrlForCache = this.getNodeParameter('profileUrlForCache', i, '') as string;
+					const forceRefresh = this.getNodeParameter('forceRefresh', i, false) as boolean;
+
+					const queryParams: any = {
+						sessionId,
+						conversationUrl,
+					};
+
+					// Add optional parameters if provided
+					if (profileUrlForCache) {
+						queryParams.profileUrl = profileUrlForCache;
+					}
+					if (forceRefresh) {
+						queryParams.forceRefresh = 'true';
+					}
 
 					const response = await this.helpers.httpRequest({
 						method: 'GET',
@@ -190,10 +230,7 @@ export class Messaging implements INodeType {
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						qs: {
-							sessionId,
-							conversationUrl,
-						},
+						qs: queryParams,
 						json: true,
 					});
 

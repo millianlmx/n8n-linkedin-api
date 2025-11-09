@@ -245,6 +245,92 @@ describe('LinkedIn DOM Functions', () => {
       expect(result[1].message).toBe("I'm doing great!");
     });
 
+    it('should convert "Today" to actual date', () => {
+      document.body.innerHTML = `
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-message-list__time-heading">Aujourd'hui</div>
+        </div>
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-event-listitem__message-bubble">
+            <p>Test message</p>
+          </div>
+          <div class="msg-s-message-group__name">John</div>
+          <div class="msg-s-message-group__timestamp">10:30</div>
+        </div>
+      `;
+
+      const result = DOMFunctions.extractConversationMessages();
+      
+      expect(result).toHaveLength(1);
+      // Should contain a formatted date like "8 nov."
+      expect(result[0].timestamp).toMatch(/\d+ \w+\. 10:30/);
+    });
+
+    it('should convert "Yesterday" to actual date', () => {
+      document.body.innerHTML = `
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-message-list__time-heading">Hier</div>
+        </div>
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-event-listitem__message-bubble">
+            <p>Test message</p>
+          </div>
+          <div class="msg-s-message-group__name">John</div>
+          <div class="msg-s-message-group__timestamp">15:00</div>
+        </div>
+      `;
+
+      const result = DOMFunctions.extractConversationMessages();
+      
+      expect(result).toHaveLength(1);
+      // Should contain a formatted date like "7 nov."
+      expect(result[0].timestamp).toMatch(/\d+ \w+\. 15:00/);
+    });
+
+    it('should convert weekday names to actual dates (French)', () => {
+      document.body.innerHTML = `
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-message-list__time-heading">lundi</div>
+        </div>
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-event-listitem__message-bubble">
+            <p>Monday message</p>
+          </div>
+          <div class="msg-s-message-group__name">John</div>
+          <div class="msg-s-message-group__timestamp">09:00</div>
+        </div>
+      `;
+
+      const result = DOMFunctions.extractConversationMessages();
+      
+      expect(result).toHaveLength(1);
+      // Should contain a formatted date like "4 nov."
+      expect(result[0].timestamp).toMatch(/\d+ \w+\. 09:00/);
+      expect(result[0].message).toBe('Monday message');
+    });
+
+    it('should convert weekday names to actual dates (English)', () => {
+      document.body.innerHTML = `
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-message-list__time-heading">Wednesday</div>
+        </div>
+        <div class="msg-s-message-list__event">
+          <div class="msg-s-event-listitem__message-bubble">
+            <p>Midweek message</p>
+          </div>
+          <div class="msg-s-message-group__name">Jane</div>
+          <div class="msg-s-message-group__timestamp">14:30</div>
+        </div>
+      `;
+
+      const result = DOMFunctions.extractConversationMessages();
+      
+      expect(result).toHaveLength(1);
+      // Should contain a formatted date
+      expect(result[0].timestamp).toMatch(/\d+ \w+\. 14:30/);
+      expect(result[0].message).toBe('Midweek message');
+    });
+
     it('should handle empty conversation', () => {
       document.body.innerHTML = '<div></div>';
 

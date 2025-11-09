@@ -434,10 +434,25 @@ class LinkedInService {
     }
   }
 
-  async readConversation(sessionId: string, conversationUrl: string) {
+  async readConversation(sessionId: string, conversationUrl: string, profileUrl?: string, forceRefresh: boolean = false) {
     const session = SessionManager.getSession(sessionId);
     if (!session || !session.isAuthenticated) {
       throw new Error('Not authenticated');
+    }
+
+    // Check cache if profileUrl is provided and forceRefresh is false
+    if (profileUrl && !forceRefresh) {
+      console.log(`🔍 Checking cache for conversation with profile: ${profileUrl}`);
+      const cachedConversation = await this.cacheService.getConversation(profileUrl);
+      
+      if (cachedConversation) {
+        console.log(`✅ Cache hit! Returning cached conversation\n`);
+        return { success: true, data: cachedConversation, cached: true };
+      }
+      
+      console.log(`❌ Cache miss. Fetching conversation from LinkedIn...\n`);
+    } else if (forceRefresh && profileUrl) {
+      console.log(`🔄 Force refresh enabled. Bypassing cache and fetching from LinkedIn...\n`);
     }
 
     const { page } = session;
@@ -462,7 +477,16 @@ class LinkedInService {
       const messages = await page.evaluate(DOMFunctions.extractConversationMessages);
 
       console.log(`✅ Successfully read conversation with ${messages.length} messages\n`);
-      return { success: true, data: messages };
+      
+      // Cache the conversation if profileUrl is provided
+      if (profileUrl) {
+        await this.cacheService.cacheConversation(profileUrl, messages);
+        if (forceRefresh) {
+          console.log(`💾 Cache updated with fresh data\n`);
+        }
+      }
+      
+      return { success: true, data: messages, cached: false };
     } catch (error: any) {
       console.error('❌ Failed to read conversation:', error.message);
       throw new Error(`Failed to read conversation: ${error.message}`);
