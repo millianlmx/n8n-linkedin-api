@@ -720,8 +720,8 @@ class LinkedInService {
         return { success: false, message: 'Already connected' };
       }
 
-      // Find and click the "Se connecter" / "Connect" button
-      const buttonClicked = await page.evaluate(() => {
+      // Try to find direct "Se connecter" button first (non-premium)
+      let buttonClicked = await page.evaluate(() => {
         // Try aria-label selector first
         let connectButton = document.querySelector(
           'button[aria-label*="Invitez"]'
@@ -744,12 +744,57 @@ class LinkedInService {
         return false;
       });
 
+      // If direct button not found, try Premium flow (Plus button -> dropdown)
       if (!buttonClicked) {
-        console.log('  ❌ Connect button not found');
-        return { success: false, message: 'Connect button not found' };
-      }
+        console.log('  🔍 Direct connect button not found, trying Premium flow...');
+        
+        // Click the "Plus" dropdown button
+        const plusButtonClicked = await page.evaluate(() => {
+          const plusButton = document.querySelector(
+            '.artdeco-dropdown button'
+          ) as HTMLButtonElement;
+          
+          if (plusButton) {
+            plusButton.click();
+            return true;
+          }
+          return false;
+        });
 
-      console.log('  ✅ Clicked connect button');
+        if (!plusButtonClicked) {
+          console.log('  ❌ Plus button not found');
+          return { success: false, message: 'Connect button not found (tried both direct and dropdown)' };
+        }
+
+        console.log('  ✅ Clicked Plus button, waiting for dropdown...');
+        await this.wait(500);
+
+        // Click "Se connecter" in the dropdown menu
+        buttonClicked = await page.evaluate(() => {
+          const dropdownItems = document.querySelectorAll('.artdeco-dropdown__content ul li');
+          
+          for (const item of Array.from(dropdownItems)) {
+            const text = item.textContent?.trim() || '';
+            if (text.includes('Se connecter') || text.includes('Connect')) {
+              const clickableDiv = item.querySelector('div') as HTMLElement;
+              if (clickableDiv) {
+                clickableDiv.click();
+                return true;
+              }
+            }
+          }
+          return false;
+        });
+
+        if (!buttonClicked) {
+          console.log('  ❌ Connect option not found in dropdown');
+          return { success: false, message: 'Connect option not found in dropdown' };
+        }
+
+        console.log('  ✅ Clicked "Se connecter" from dropdown');
+      } else {
+        console.log('  ✅ Clicked direct connect button');
+      }
 
       // Wait for modal to appear
       await this.wait(500);

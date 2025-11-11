@@ -167,6 +167,12 @@ Content-Type: application/json
 }
 ```
 
+**Notes:**
+- Automatically detects and handles both regular and LinkedIn Premium profiles
+- For Premium profiles, uses the dropdown menu (Plus button → "Se connecter")
+- For regular profiles, uses the direct "Connect" button
+- Optional message parameter adds a personalized note to the connection request
+
 ### Messaging Endpoints
 
 #### List Conversations
