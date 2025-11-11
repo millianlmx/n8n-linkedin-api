@@ -39,6 +39,12 @@ export class Login implements INodeType {
 						description: 'Initialize browser and login to LinkedIn',
 						action: 'Initialize and login to LinkedIn',
 					},
+					{
+						name: 'Logout',
+						value: 'logout',
+						description: 'Logout and close browser session',
+						action: 'Logout and close browser session',
+					},
 				],
 				default: 'login',
 			},
@@ -69,6 +75,20 @@ export class Login implements INodeType {
 					},
 				},
 				description: 'LinkedIn password (optional if set in API .env)',
+			},
+			{
+				displayName: 'Session ID',
+				name: 'sessionId',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: {
+					show: {
+						operation: ['logout'],
+					},
+				},
+				description: 'The session ID to logout (from login operation)',
+				placeholder: 'Enter session ID or use expression: {{$json.sessionId}}',
 			},
 		],
 	};
@@ -135,6 +155,34 @@ export class Login implements INodeType {
 						success: loginResponse.success || true,
 						sessionId: sessionId,
 						message: loginResponse.message || 'Successfully logged in to LinkedIn',
+						timestamp: new Date().toISOString(),
+					};
+				} else if (operation === 'logout') {
+					// Get session ID from node parameter
+					const sessionId = this.getNodeParameter('sessionId', i) as string;
+
+					if (!sessionId) {
+						throw new Error('Session ID is required for logout');
+					}
+
+					// Call logout endpoint
+					const logoutResponse = await this.helpers.httpRequest({
+						method: 'DELETE',
+						url: `${baseUrl}/api/auth/logout`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: {
+							sessionId,
+						},
+						json: true,
+					});
+
+					// Return logout status
+					responseData = {
+						success: logoutResponse.success || true,
+						sessionId: sessionId,
+						message: logoutResponse.message || 'Successfully logged out',
 						timestamp: new Date().toISOString(),
 					};
 				}

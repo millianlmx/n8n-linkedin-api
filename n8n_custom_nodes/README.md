@@ -4,6 +4,7 @@ Custom n8n nodes for integrating with the LinkedIn API scraper service.
 
 ## Features
 
+- **LinkedIn Login Node**: Initialize session, login, and logout
 - **LinkedIn Profile Node**: Scrape profiles, visit profiles, and get profile views
 - **LinkedIn Connection Node**: Send connection requests
 - **LinkedIn Messaging Node**: List conversations, read messages, send messages
@@ -78,6 +79,19 @@ docker-compose restart n8n
 
 The following nodes will be available in your n8n workflow editor:
 
+#### LinkedIn Login Node
+
+**Operations:**
+- **Initialize and Login**: Initialize browser session and login to LinkedIn
+  - Inputs: Email (optional), Password (optional)
+  - Output: Session ID and success status
+  - Note: Email and password can be set in credentials or provided per execution
+
+- **Logout**: Close browser session and logout
+  - Input: Session ID
+  - Output: Success status
+  - Use this to clean up sessions when done
+
 #### LinkedIn Profile Node
 
 **Operations:**
@@ -130,16 +144,28 @@ The following nodes will be available in your n8n workflow editor:
 
 ## Example Workflows
 
-### Example 1: Scrape Multiple Profiles
+### Example 1: Complete Session Management
 
 ```
 [Manual Trigger] 
+  → [LinkedIn Login: Initialize and Login]
+  → [LinkedIn Profile: Scrape Profile]
+  → [Google Sheets: Append]
+  → [LinkedIn Login: Logout]
+```
+
+### Example 2: Scrape Multiple Profiles
+
+```
+[Manual Trigger] 
+  → [LinkedIn Login: Initialize and Login]
   → [Code Node: Generate URLs]
   → [LinkedIn Profile: Scrape Profile]
   → [Google Sheets: Append]
+  → [LinkedIn Login: Logout]
 ```
 
-### Example 2: Auto-Connect with Message
+### Example 3: Auto-Connect with Message
 
 ```
 [LinkedIn Search: Search People]
@@ -148,7 +174,7 @@ The following nodes will be available in your n8n workflow editor:
   → [Slack: Notify]
 ```
 
-### Example 3: Monitor Unread Messages
+### Example 4: Monitor Unread Messages
 
 ```
 [Schedule Trigger: Every 5 minutes]
@@ -161,6 +187,7 @@ The following nodes will be available in your n8n workflow editor:
 
 - `POST /api/auth/init` - Initialize session
 - `POST /api/auth/login` - Authenticate
+- `DELETE /api/auth/logout` - Logout and close session
 - `POST /api/profile/scrape` - Scrape profile
 - `POST /api/profile/visit` - Visit profile
 - `GET /api/profile/views` - Get profile views
