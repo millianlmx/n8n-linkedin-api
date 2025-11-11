@@ -168,10 +168,12 @@ Content-Type: application/json
 ```
 
 **Notes:**
-- Automatically detects and handles both regular and LinkedIn Premium profiles
-- For Premium profiles, uses the dropdown menu (Plus button → "Se connecter")
-- For regular profiles, uses the direct "Connect" button
+- **Automatic UI Detection**: Intelligently detects whether the profile uses Premium or regular UI
+  - **Premium Flow** (💎): Plus button → Dropdown → "Se connecter"
+  - **Regular Flow** (📱): Direct "Connect" button
+- The system checks the page structure and automatically chooses the correct flow
 - Optional message parameter adds a personalized note to the connection request
+- Works seamlessly with both LinkedIn Premium and free accounts
 
 ### Messaging Endpoints
 

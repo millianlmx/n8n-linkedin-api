@@ -74,7 +74,7 @@ class LinkedInService {
     
     try {
       const browser = await puppeteer.launch({
-        headless: true,
+        headless: false,
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
@@ -720,38 +720,77 @@ class LinkedInService {
         return { success: false, message: 'Already connected' };
       }
 
-      // Try to find direct "Se connecter" button first (non-premium)
-      let buttonClicked = await page.evaluate(() => {
-        // Try aria-label selector first
-        let connectButton = document.querySelector(
-          'button[aria-label*="Invitez"]'
+      // Detect which UI flow to use (Premium vs Regular)
+      const uiType = await page.evaluate(() => {
+        // Check for Plus dropdown button (premium profile)
+        const plusButton = document.querySelector(
+            "#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card.AGDDJEWUIGxvUeCWnjRyxxuoAIoropDXce > div.ph5.pb5 > div.dLQclXVMsTccpCHwnLzWAwBcxvhuzSNgedE > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button"
         ) as HTMLButtonElement;
         
-        if (!connectButton) {
-          // Try finding by button text content
-          const buttons = Array.from(document.querySelectorAll('button.artdeco-button--primary'));
-          connectButton = buttons.find(btn => {
+        if (plusButton) {
+          return 'premium';
+        }
+
+        // Check for direct connect button (regular profile)
+        const directButton = document.querySelector('button[aria-label*="Invitez"]') ||
+          Array.from(document.querySelectorAll('button.artdeco-button--primary')).find(btn => {
             const text = btn.textContent?.trim() || '';
             return text.includes('Se connecter') || text.includes('Connect');
-          }) as HTMLButtonElement;
+          });
+        
+        if (directButton) {
+          return 'regular';
         }
         
-        if (connectButton) {
-          connectButton.click();
-          return true;
-        }
-        
-        return false;
+        return 'unknown';
       });
 
-      // If direct button not found, try Premium flow (Plus button -> dropdown)
-      if (!buttonClicked) {
-        console.log('  🔍 Direct connect button not found, trying Premium flow...');
+      console.log(`  🔍 Detected UI type: ${uiType}`);
+
+      let buttonClicked = false;
+
+      if (uiType === 'regular') {
+        // Regular flow: Direct "Se connecter" button
+        console.log('  📱 Using regular profile flow...');
+        
+        buttonClicked = await page.evaluate(() => {
+          // Try aria-label selector first
+          let connectButton = document.querySelector(
+            'button[aria-label*="Invitez"]'
+          ) as HTMLButtonElement;
+          
+          if (!connectButton) {
+            // Try finding by button text content
+            const buttons = Array.from(document.querySelectorAll('button.artdeco-button--primary'));
+            connectButton = buttons.find(btn => {
+              const text = btn.textContent?.trim() || '';
+              return text.includes('Se connecter') || text.includes('Connect');
+            }) as HTMLButtonElement;
+          }
+          
+          if (connectButton) {
+            connectButton.click();
+            return true;
+          }
+          
+          return false;
+        });
+
+        if (!buttonClicked) {
+          console.log('  ❌ Connect button not found');
+          return { success: false, message: 'Connect button not found' };
+        }
+
+        console.log('  ✅ Clicked direct connect button');
+
+      } else if (uiType === 'premium') {
+        // Premium flow: Plus button -> dropdown -> "Se connecter"
+        console.log('  💎 Using Premium profile flow...');
         
         // Click the "Plus" dropdown button
         const plusButtonClicked = await page.evaluate(() => {
           const plusButton = document.querySelector(
-            '.artdeco-dropdown button'
+            "#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card.AGDDJEWUIGxvUeCWnjRyxxuoAIoropDXce > div.ph5.pb5 > div.dLQclXVMsTccpCHwnLzWAwBcxvhuzSNgedE > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button"
           ) as HTMLButtonElement;
           
           if (plusButton) {
@@ -763,7 +802,7 @@ class LinkedInService {
 
         if (!plusButtonClicked) {
           console.log('  ❌ Plus button not found');
-          return { success: false, message: 'Connect button not found (tried both direct and dropdown)' };
+          return { success: false, message: 'Plus button not found' };
         }
 
         console.log('  ✅ Clicked Plus button, waiting for dropdown...');
@@ -792,8 +831,10 @@ class LinkedInService {
         }
 
         console.log('  ✅ Clicked "Se connecter" from dropdown');
+
       } else {
-        console.log('  ✅ Clicked direct connect button');
+        console.log('  ❌ Could not detect UI type (neither regular nor premium)');
+        return { success: false, message: 'Could not find connect button (unknown UI type)' };
       }
 
       // Wait for modal to appear
