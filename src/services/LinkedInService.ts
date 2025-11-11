@@ -74,7 +74,7 @@ class LinkedInService {
     
     try {
       const browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
