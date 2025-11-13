@@ -8,18 +8,41 @@ const router = Router();
 /**
  * POST /api/auth/init
  * Initialize a new browser session
+ * Body: { email?: string } - Optional email to restore saved browser state
  */
 router.post('/init', async (req: Request, res: Response) => {
   try {
+    const { email } = req.body;
     console.log('📥 Received request to initialize browser');
-    const { browser, page } = await LinkedInService.initializeBrowser();
+    
+    if (email) {
+      console.log(`   Using email for state restoration: ${email}`);
+    }
+    
+    const { browser, page, sessionRestored } = await LinkedInService.initializeBrowser(email);
     const sessionId = SessionManager.createSession(browser, page);
+
+    // If session was restored, mark as authenticated
+    if (sessionRestored) {
+      SessionManager.updateSession(sessionId, {
+        isAuthenticated: true,
+      });
+      
+      // Start message monitoring automatically
+      try {
+        await LinkedInService.startMessageMonitoring(sessionId);
+        console.log('✅ Message monitoring started automatically');
+      } catch (monitoringError: any) {
+        console.warn(`⚠️  Failed to start automatic monitoring: ${monitoringError.message}`);
+      }
+    }
 
     console.log(`✅ Session created with ID: ${sessionId}`);
     res.json({
       success: true,
       sessionId,
-      message: 'Browser initialized',
+      sessionRestored: sessionRestored || false,
+      message: sessionRestored ? 'Browser initialized with saved session' : 'Browser initialized',
     });
   } catch (error: any) {
     console.error('❌ Error initializing browser:', error);

@@ -1,7 +1,9 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
 import SessionManager from './SessionManager';
 import { CacheService } from './CacheService';
-import { LinkedInSession, SendMessageRequest, ConnectRequest, LoginRequest, ProfileScrapeRequest } from '../types';
+import CaptchaService from './CaptchaService';
+import BrowserStateService from './BrowserStateService';
+import { SendMessageRequest, LoginRequest, ProfileScrapeRequest } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
 
 import { existsSync } from 'fs';
@@ -61,9 +63,10 @@ class LinkedInService {
 
   /**
    * Initializes a Puppeteer browser instance
+   * @param userIdentifier - Optional user identifier to restore browser state
    * @returns Browser instance and new page
    */
-  async initializeBrowser() {
+  async initializeBrowser(userIdentifier?: string) {
     console.log('🚀 Initializing browser...');
     
     const executablePath = this.findChrome();
@@ -90,13 +93,40 @@ class LinkedInService {
 
       const page = await browser.newPage();
       
-      // Set user agent to avoid detection
+      // Set user agent to match real browser
       await page.setUserAgent(
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       );
       
+      // Try to restore browser state if user identifier is provided
+      if (userIdentifier) {
+        const hasState = await BrowserStateService.hasBrowserState(userIdentifier);
+        if (hasState) {
+          console.log('🔄 Restoring saved browser state...');
+          const restored = await BrowserStateService.restoreBrowserState(userIdentifier, page);
+          
+          if (restored) {
+            // Verify if the session is still valid
+            const isValid = await BrowserStateService.verifySession(page);
+            
+            if (isValid) {
+              console.log('✅ Browser state restored and session is valid');
+              console.log('✅ Skipping login - using saved session\n');
+              
+              // Return with sessionRestored flag and isAuthenticated flag
+              // The caller should set isAuthenticated on the session after creating it
+              return { browser, page, sessionRestored: true, isAuthenticated: true };
+            } else {
+              console.log('⚠️  Saved session expired, will need to login again');
+              // Delete expired state
+              await BrowserStateService.deleteBrowserState(userIdentifier);
+            }
+          }
+        }
+      }
+      
       console.log('✅ Browser initialized successfully\n');
-      return { browser, page };
+      return { browser, page, sessionRestored: false };
     } catch (error: any) {
       console.error('❌ Failed to initialize browser:', error.message);
       throw new Error(`Failed to initialize browser: ${error.message}`);
@@ -199,7 +229,27 @@ class LinkedInService {
           isAuthenticated: true,
         });
 
-        console.log('✅ Login successful\n');
+        console.log('✅ Login successful');
+        
+        // Save browser state (cookies, localStorage, sessionStorage)
+        try {
+          const userIdentifier = credentials.email || process.env.LINKEDIN_EMAIL || sessionId;
+          await BrowserStateService.saveBrowserState(userIdentifier, page);
+          console.log('✅ Browser state saved for future sessions');
+        } catch (saveError: any) {
+          console.warn(`⚠️  Failed to save browser state: ${saveError.message}`);
+        }
+        
+        // Automatically start message monitoring in a separate tab
+        console.log('🚀 Starting automatic message monitoring...');
+        try {
+          await this.startMessageMonitoring(sessionId);
+          console.log('✅ Message monitoring started automatically\n');
+        } catch (monitoringError: any) {
+          console.warn(`⚠️  Failed to start automatic monitoring: ${monitoringError.message}`);
+          console.log('   You can start it manually later\n');
+        }
+        
         return { 
           success: true,
           message: 'Login successful',

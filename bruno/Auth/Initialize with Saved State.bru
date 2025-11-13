@@ -1,0 +1,51 @@
+meta {
+  name: Initialize with Saved State
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/auth/init
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "{{linkedinEmail}}"
+  }
+}
+
+docs {
+  # Initialize Browser with Saved State
+  
+  This endpoint initializes a new browser session and attempts to restore
+  saved browser state (cookies, localStorage, sessionStorage) if available.
+  
+  ## Request Body
+  - `email` (optional): Email address to identify saved browser state
+  
+  ## Response
+  - `sessionId`: Unique session identifier
+  - `sessionRestored`: Boolean indicating if saved state was restored
+  - `message`: Status message
+  
+  ## Usage
+  
+  ### First Time (No Saved State)
+  If no saved state exists for the email, a fresh browser session is created.
+  You'll need to call the login endpoint next.
+  
+  ### Subsequent Times (With Saved State)
+  If saved state exists and is valid:
+  - Browser state is restored automatically
+  - Session is marked as authenticated
+  - Message monitoring starts automatically
+  - You can skip the login step entirely!
+  
+  ## Benefits
+  - Skip login process
+  - Avoid CAPTCHA challenges
+  - Faster initialization
+  - Persistent sessions across API restarts
+}

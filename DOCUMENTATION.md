@@ -16,24 +16,61 @@
 - Node.js v16+
 - Chrome/Chromium browser
 - LinkedIn account
+- PostgreSQL (for message caching)
+- 2Captcha API key (optional, for automatic CAPTCHA solving)
 
-### Setup (3 steps)
+### Setup (2 steps)
 
 ```bash
-# 1. Setup
+# 1. Setup environment
 ./setup.sh
 
-# 2. Start server
+# 2. Start server (auto-login enabled)
 npm run dev
-
-# 3. Test
-npm run example
 ```
+
+That's it! The server will automatically:
+1. ✅ Initialize browser session
+2. ✅ Login to LinkedIn using credentials from `.env`
+3. ✅ Create dedicated tab for operations
+4. ✅ Create monitoring tab for real-time messages
+5. ✅ Start message monitoring automatically
+6. ✅ Cache conversations in PostgreSQL
+
+### Automatic Features on Startup
+When the server starts, it automatically:
+- 🚀 **Initializes browser** - Opens Chrome/Chromium
+- 🔐 **Logs in to LinkedIn** - Uses credentials from `.env`
+- 🤖 **Solves CAPTCHAs** - Automatically handles reCAPTCHA v2 challenges (if 2Captcha API key is configured)
+- 📱 **Creates two tabs**:
+  - Tab 1: LinkedIn operations (scraping, connections, messaging)
+  - Tab 2: Message monitoring (real-time detection)
+- 🔍 **Starts monitoring** - Detects new messages instantly
+- 💾 **Caches conversations** - Stores in PostgreSQL incrementally
+
+**No manual initialization needed!** Just start the server and it's ready.
+
+### CAPTCHA Solving (Optional)
+The system can automatically solve LinkedIn's reCAPTCHA v2 challenges using 2Captcha:
+
+1. **Get API Key**: Sign up at [2captcha.com](https://2captcha.com) and get your API key
+2. **Configure**: Add to your `.env` file:
+   ```
+   CAPTCHA_API_KEY=your_actual_api_key_here
+   ```
+3. **Done**: The system will automatically detect and solve CAPTCHAs during login
+
+**Benefits:**
+- ✅ Fully automated login even with CAPTCHA challenges
+- ✅ No manual intervention needed
+- ✅ Solves in 30-60 seconds
+- ⚠️ Costs ~$2.99 per 1000 CAPTCHAs solved
+
+**Without 2Captcha:**
+If you don't configure 2Captcha, the system will pause when it encounters a CAPTCHA and you'll need to solve it manually in the browser window.
 
 ### Your Credentials
 Pre-configured in `.env.example`:
-- Email: millian59192@gmail.com
-- Password: mixSGj/zVS64zD(
 
 ---
 
@@ -75,7 +112,23 @@ http://localhost:3000
 
 ### Authentication Endpoints
 
-#### Initialize Session
+#### Get Global Session (Auto-Initialized)
+```http
+GET /api/session
+```
+**Response:**
+```json
+{
+  "success": true,
+  "sessionId": "uuid-string",
+  "isAuthenticated": true,
+  "hasMonitoring": true,
+  "currentUrl": "https://www.linkedin.com/feed/"
+}
+```
+**Note:** This endpoint returns the auto-initialized session created on server startup. Use this to get the session ID for API calls.
+
+#### Initialize Session (Manual - Optional)
 ```http
 POST /api/auth/init
 ```
@@ -87,6 +140,7 @@ POST /api/auth/init
   "message": "Browser session initialized"
 }
 ```
+**Note:** Only needed if you want to create additional sessions. The server auto-creates one on startup.
 
 #### Login
 ```http
@@ -108,6 +162,14 @@ Content-Type: application/json
   "message": "Login successful"
 }
 ```
+
+**Automatic Actions After Login:**
+- 🚀 Creates a dedicated monitoring tab
+- 🔍 Starts real-time message monitoring using MutationObserver
+- 💾 Begins caching conversations in PostgreSQL
+- ✅ Ready to detect new messages instantly
+
+**Note:** If you use `POST /api/auth/force-authenticate` to manually mark a session as authenticated, message monitoring will also start automatically.
 
 #### Logout
 ```http
