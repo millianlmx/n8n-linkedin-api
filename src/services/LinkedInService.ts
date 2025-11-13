@@ -3,7 +3,7 @@ import SessionManager from './SessionManager';
 import { CacheService } from './CacheService';
 import { LinkedInSession, SendMessageRequest, ConnectRequest, LoginRequest, ProfileScrapeRequest } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
-import { MessagingDOMFunctions } from '../utils/messaging-dom-functions';
+
 import { existsSync } from 'fs';
 
 /**
@@ -147,9 +147,44 @@ class LinkedInService {
       // Wait a bit for any redirects to complete
       await this.wait(2000);
 
-      // Check if we're on the feed page (successful login)
-      const currentUrl = page.url();
+      // Check current URL to determine next action
+      let currentUrl = page.url();
       console.log(`📍 Current URL after login: ${currentUrl}`);
+
+      // Only check for CAPTCHA if we're on the challenge page
+      if (currentUrl.includes('/checkpoint/challenge')) {
+        console.log('🔒 LinkedIn challenge page detected!');
+        
+        // Check for CAPTCHA challenge
+        const hasCaptcha = await CaptchaService.detectRecaptcha(page);
+        if (hasCaptcha) {
+          console.log('🔒 reCAPTCHA challenge detected!');
+          
+          if (CaptchaService.isAvailable()) {
+            console.log('🤖 Attempting to solve CAPTCHA automatically...');
+            const solved = await CaptchaService.handleRecaptchaChallenge(page);
+            
+            if (solved) {
+              console.log('✅ CAPTCHA solved! Waiting for page to process...');
+              // Wait for navigation after CAPTCHA is solved
+              await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {
+                console.log('   Navigation timeout - checking current URL...');
+              });
+              await this.wait(2000);
+              currentUrl = page.url();
+              console.log(`📍 URL after CAPTCHA solve: ${currentUrl}`);
+            } else {
+              console.warn('⚠️  Failed to solve CAPTCHA automatically');
+              throw new Error('CAPTCHA challenge detected but could not be solved automatically. Please solve it manually or check your 2Captcha API key.');
+            }
+          } else {
+            throw new Error('CAPTCHA challenge detected but 2Captcha service is not configured. Please set CAPTCHA_API_KEY in your .env file or solve it manually.');
+          }
+        } else {
+          console.log('⚠️  Challenge page detected but no reCAPTCHA found - may need manual intervention');
+          throw new Error('LinkedIn security challenge detected. Please complete it manually in the browser.');
+        }
+      }
       
       // Check for successful login indicators
       const isLoggedIn = currentUrl.includes('/feed') || 

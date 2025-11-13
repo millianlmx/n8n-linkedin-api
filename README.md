@@ -7,6 +7,7 @@ A powerful, containerized REST API for LinkedIn automation with TypeScript, Expr
 - **[API Reference](./DOCUMENTATION.md)** - Complete endpoint documentation
 - **[Custom Implementation](./CUSTOM_IMPLEMENTATION.md)** - Architecture & implementation details
 - **[Docker Deployment](./DOCKER_DEPLOYMENT.md)** - Container deployment guide
+- **[Browser State Persistence](./BROWSER_STATE_PERSISTENCE.md)** - Avoid re-login and CAPTCHAs with saved sessions
 - **[Conversation URL Endpoint](./CONVERSATION_URL_ENDPOINT.md)** - Detailed guide for the new conversation URL feature
 - **[Test Coverage](./FINAL_COVERAGE_REPORT.md)** - 80.95% test coverage report
 
@@ -35,11 +36,12 @@ COMPOSE_PROFILES=production podman compose up -d
 ## Features
 
 - ✅ **Authentication**: Secure session-based login
+- ✅ **Browser State Persistence**: Save cookies to avoid re-login and CAPTCHAs (NEW!)
 - ✅ **Profile Scraping**: Extract comprehensive profile data
 - ✅ **PostgreSQL Caching**: High-performance caching layer
 - ✅ **Connection Requests**: Automated connection management
 - ✅ **Messaging**: List, read, and send messages
-- ✅ **Get Conversation URL**: Retrieve conversation URL from profile URL (NEW!)
+- ✅ **Get Conversation URL**: Retrieve conversation URL from profile URL
 - ✅ **Profile Visits**: Track and visit profiles
 - ✅ **Search People**: Find LinkedIn users by keywords
 - ✅ **Dockerized**: Easy deployment with Docker/Podman
@@ -110,14 +112,23 @@ DB_PASSWORD=postgres
 DB_NAME=linkedin
 ```
 
-## Caching System
+## Caching & Persistence
 
+### Profile Caching
 The API uses PostgreSQL to cache scraped profiles:
 
 - **First Request**: Scrapes LinkedIn and stores in database
 - **Subsequent Requests**: Returns cached data instantly
 - **Performance**: 60-80% faster for repeated requests
 - **Schema**: JSONB storage with indexed profile URLs
+
+### Browser State Persistence (NEW!)
+Save browser state to avoid repeated logins and CAPTCHAs:
+
+- **First Login**: Saves all cookies, localStorage, and sessionStorage
+- **Subsequent Sessions**: Restores saved state automatically
+- **Benefits**: Skip login, avoid CAPTCHAs, faster initialization
+- **Details**: See [Browser State Persistence](./BROWSER_STATE_PERSISTENCE.md)
 
 ## License
 

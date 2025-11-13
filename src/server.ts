@@ -7,6 +7,7 @@ import connectionRoutes from './routes/connection.routes';
 import messageRoutes from './routes/message.routes';
 import searchRoutes from './routes/search.routes';
 import SessionManager from './services/SessionManager';
+import LinkedInService from './services/LinkedInService';
 
 // Load environment variables
 dotenv.config();
@@ -113,7 +114,7 @@ process.on('SIGINT', async () => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
