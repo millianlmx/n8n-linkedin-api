@@ -1,0 +1,88 @@
+meta {
+  name: Start Monitoring
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/messages/monitoring/start
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "sessionId": "{{sessionId}}"
+  }
+}
+
+docs {
+  # Start Message Monitoring
+  
+  Starts automatic message monitoring in a dedicated browser tab.
+  
+  ## Features
+  - Creates a separate browser tab for monitoring (doesn't interfere with other operations)
+  - **Real-time detection** using MutationObserver (detects messages instantly!)
+  - Automatically processes new messages as they arrive
+  - Intelligently detects new messages by comparing with cached data
+  - Only updates cache when actual new messages are detected
+  - Extracts profile URLs from conversations for proper cache lookup
+  - Reduces bot detection risk by separating monitoring from active browsing
+  - Periodic refresh every 15 minutes as backup (ensures observer stays active)
+  
+  ## How It Works
+  1. Sets up a MutationObserver on the LinkedIn messaging page
+  2. Observer watches for changes in conversation list (new unread badges)
+  3. When new message detected (INSTANT):
+     - Triggers message processing immediately
+     - Extracts the profile URL from the conversation
+     - Looks up cached messages in PostgreSQL by profile URL
+     - Fetches fresh messages from LinkedIn
+     - Compares fresh vs cached messages
+     - Updates cache only if new messages detected
+  4. Backup: Refreshes page every 15 minutes to ensure observer stays active
+  5. Logs detailed information about new messages found
+  
+  ## Usage
+  1. Login first to get a sessionId
+  2. Call this endpoint to start monitoring
+  3. Monitoring runs in background
+  4. New messages are automatically detected and cached
+  
+  ## Console Output Examples
+  
+  ### Real-time detection (instant):
+  ```
+  👁️  MutationObserver set up successfully
+  🔔 New message detected by observer
+  📨 Processing new message notification...
+  📨 Found 1 unread conversation(s)
+    📍 Extracted profile URL: https://www.linkedin.com/in/john-doe/
+    ✅ Updated cache for John Doe (+1 messages)
+  ```
+  
+  ### Multiple messages:
+  ```
+  🔔 New message detected by observer
+  📨 Processing new message notification...
+  📨 Found 2 unread conversation(s)
+    📍 Extracted profile URL: https://www.linkedin.com/in/john-doe/
+    ✅ Updated cache for John Doe (+3 messages)
+    📍 Extracted profile URL: https://www.linkedin.com/in/jane-smith/
+    ℹ️  No new messages from: Jane Smith
+  ```
+  
+  ### No new messages:
+  ```
+  ✓ No unread conversations
+  ```
+  
+  ## Response
+  ```json
+  {
+    "success": true,
+    "message": "Message monitoring started"
+  }
+  ```
+}

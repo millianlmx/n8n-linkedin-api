@@ -177,6 +177,73 @@ Content-Type: application/json
 
 ### Messaging Endpoints
 
+#### Start Message Monitoring
+**Starts automatic message monitoring in a dedicated browser tab**
+```http
+POST /api/messages/monitoring/start
+Content-Type: application/json
+
+{
+  "sessionId": "uuid-string"
+}
+```
+
+**Features:**
+- Creates a dedicated browser tab for monitoring (separate from interactive operations)
+- **Real-time detection** using MutationObserver (detects messages instantly)
+- Automatically processes new messages as they arrive
+- Intelligently detects new messages by comparing with cached data
+- Only updates cache when actual new messages are detected
+- Extracts profile URLs from conversations for proper cache lookup
+- Reduces bot detection risk by separating monitoring from active browsing
+- Runs in background without interfering with other operations
+- Periodic refresh every 15 minutes as backup (ensures observer stays active)
+
+**How It Works:**
+1. Sets up a MutationObserver on the LinkedIn messaging page
+2. Observer watches for changes in conversation list (new unread badges)
+3. When new message detected:
+   - Instantly triggers message processing
+   - Extracts the profile URL from the conversation
+   - Looks up cached messages in PostgreSQL by profile URL
+   - Fetches fresh messages from LinkedIn
+   - Compares fresh vs cached messages
+   - Updates cache only if new messages detected
+4. Backup: Refreshes page every 15 minutes to ensure observer stays active
+5. Logs detailed information about new messages found
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Message monitoring started"
+}
+```
+
+#### Stop Message Monitoring
+**Stops the automatic message monitoring**
+```http
+POST /api/messages/monitoring/stop
+Content-Type: application/json
+
+{
+  "sessionId": "uuid-string"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Message monitoring stopped"
+}
+```
+
+**Notes:**
+- Monitoring automatically stops when the session is closed
+- Only one monitoring instance per session
+- Monitoring page is separate from the main interactive page
+
 #### List Conversations
 **Lists ALL your conversations** (inbox overview)
 ```http

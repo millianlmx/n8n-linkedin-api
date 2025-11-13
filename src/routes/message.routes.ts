@@ -4,6 +4,58 @@ import LinkedInService from '../services/LinkedInService';
 const router = Router();
 
 /**
+ * POST /api/messages/monitoring/start
+ * Start message monitoring for a session
+ * Body: { sessionId: string }
+ */
+router.post('/monitoring/start', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required',
+      });
+    }
+
+    const result = await LinkedInService.startMessageMonitoring(sessionId);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/messages/monitoring/stop
+ * Stop message monitoring for a session
+ * Body: { sessionId: string }
+ */
+router.post('/monitoring/stop', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID is required',
+      });
+    }
+
+    const result = await LinkedInService.stopMessageMonitoring(sessionId);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
  * GET /api/messages/conversations
  * List all conversations
  * Query: sessionId

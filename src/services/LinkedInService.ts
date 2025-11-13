@@ -1,9 +1,10 @@
-import * as puppeteer from 'puppeteer';
+import puppeteer, { Browser, Page } from 'puppeteer';
 import SessionManager from './SessionManager';
-import { LoginRequest, ProfileScrapeRequest, SendMessageRequest } from '../types';
-import { existsSync } from 'fs';
 import { CacheService } from './CacheService';
+import { LinkedInSession, SendMessageRequest, ConnectRequest, LoginRequest, ProfileScrapeRequest } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
+import { MessagingDOMFunctions } from '../utils/messaging-dom-functions';
+import { existsSync } from 'fs';
 
 /**
  * LinkedIn Service
@@ -74,7 +75,7 @@ class LinkedInService {
     
     try {
       const browser = await puppeteer.launch({
-        headless: true,
+        headless: false,
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
@@ -188,6 +189,422 @@ class LinkedInService {
     } catch (error: any) {
       console.error('❌ Login failed:', error.message);
       throw new Error(`Login failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Start message monitoring in a dedicated browser tab
+   * Refreshes every 15 minutes to check for new messages
+   */
+  async startMessageMonitoring(sessionId: string) {
+    const session = SessionManager.getSession(sessionId);
+    if (!session || !session.isAuthenticated) {
+      throw new Error('Not authenticated');
+    }
+
+    try {
+      console.log('📬 Starting message monitoring...');
+
+      // Create a new page for monitoring
+      const monitoringPage = await session.browser.newPage();
+      
+      // Forward console logs from browser to Node.js (excluding errors to reduce noise)
+      monitoringPage.on('console', (msg) => {
+        const type = msg.type();
+        const text = msg.text();
+        if (type === 'log') console.log(`[Browser] ${text}`);
+        // Skip browser errors to avoid polluting logs
+      });
+      
+      // Navigate to messaging page (faster loading)
+      await monitoringPage.goto('https://www.linkedin.com/messaging/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000,
+      });
+      console.log('✅ Monitoring page loaded');
+
+      // Wait for conversation list to be present
+      await this.wait(2000);
+
+      // Store monitoring page in session
+      SessionManager.updateSession(sessionId, {
+        monitoringPage,
+      });
+
+      // Flag to prevent concurrent processing
+      let isProcessing = false;
+
+      // Function to setup the observer (can be called multiple times)
+      const setupObserver = async () => {
+        const observerSetup = await monitoringPage.evaluate((domFunctions) => {
+          // Inject DOM functions into window
+          (window as any).processUnreadConversations = domFunctions.processUnreadConversations;
+          
+          // Setup the observer
+          return domFunctions.setupMessageObserver();
+        }, MessagingDOMFunctions);
+
+        return observerSetup;
+      };
+
+      // IMPORTANT: Expose function BEFORE setting up the observer
+      // This allows the browser to call our Node.js function
+      await monitoringPage.exposeFunction('handleNewMessage', async () => {
+        // Prevent concurrent executions
+        if (isProcessing) {
+          return;
+        }
+        
+        isProcessing = true;
+        
+        try {
+          console.log('📨 Processing new message notification...');
+          
+          // Get unread conversations
+          const conversations = await monitoringPage.evaluate(() => {
+            return (window as any).processUnreadConversations();
+          });
+
+          if (conversations.length > 0) {
+            console.log(`📨 Found ${conversations.length} unread conversation(s)`);
+            
+            // Process each unread conversation
+            for (const conv of conversations) {
+              try {
+                console.log(`  📍 Processing: ${conv.name}`);
+                
+                // Click on the conversation to open it
+                await monitoringPage.evaluate((domFunctions, elementId) => {
+                  return domFunctions.clickConversation(elementId);
+                }, MessagingDOMFunctions, conv.elementId);
+                
+                // Wait for the conversation to load
+                await this.wait(2000);
+                
+                // Get the current URL which should now be the conversation URL
+                const currentUrl = monitoringPage.url();
+                console.log(`  📍 Conversation URL: ${currentUrl}`);
+                
+                // Extract shortened profile URL from the thread detail section
+                const shortenedProfileUrl = await monitoringPage.evaluate((domFunctions) => {
+                  return domFunctions.extractProfileUrl();
+                }, MessagingDOMFunctions);
+                
+                if (!shortenedProfileUrl) {
+                  console.log(`  ⚠️  Could not extract profile URL for: ${conv.name}`);
+                  continue;
+                }
+                
+                // Open the shortened URL in a new tab to get the real profile URL
+                const profilePage = await session.browser.newPage();
+                let cleanProfileUrl: string;
+                
+                try {
+                  // Navigate to the shortened URL (don't wait for full load)
+                  await profilePage.goto(shortenedProfileUrl, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 10000,
+                  });
+                  
+                  // Wait 3 seconds for redirect to complete
+                  await this.wait(3000);
+                  
+                  // Get the real profile URL from the browser
+                  const realProfileUrl = profilePage.url();
+                  
+                  // Clean profile URL (remove query params)
+                  cleanProfileUrl = realProfileUrl.split('?')[0];
+                  console.log(`  📍 Profile URL: ${cleanProfileUrl}`);
+                  
+                  // Close the profile page
+                  await profilePage.close();
+                } catch (error: any) {
+                  console.error(`  ❌ Failed to resolve profile URL: ${error.message}`);
+                  await profilePage.close();
+                  continue;
+                }
+
+                // Get existing cached messages
+                const cachedMessages = await this.cacheService.getConversation(cleanProfileUrl);
+                
+                // Fetch only the visible new messages from LinkedIn (no scrolling)
+                const newMessages = await this.readConversationInternal(monitoringPage, currentUrl, cleanProfileUrl, false);
+                
+                // Merge: append new messages to existing cache
+                let updatedMessages;
+                if (cachedMessages && Array.isArray(cachedMessages)) {
+                  // Filter out duplicates by checking message content and timestamp
+                  const existingMessageIds = new Set(
+                    cachedMessages.map((m: any) => `${m.sender}_${m.timestamp}_${m.message}`)
+                  );
+                  
+                  const uniqueNewMessages = newMessages.filter((m: any) => 
+                    !existingMessageIds.has(`${m.sender}_${m.timestamp}_${m.message}`)
+                  );
+                  
+                  // Append new messages to the end
+                  updatedMessages = [...cachedMessages, ...uniqueNewMessages];
+                  console.log(`  ✅ Added ${uniqueNewMessages.length} new message(s) for ${conv.name}`);
+                } else {
+                  // No existing cache, use all messages
+                  updatedMessages = newMessages;
+                  console.log(`  ✅ Cached ${newMessages.length} message(s) for ${conv.name}`);
+                }
+                
+                // Update cache with merged messages
+                await this.cacheService.cacheConversation(cleanProfileUrl, updatedMessages);
+                
+              } catch (error: any) {
+                console.error(`  ❌ Failed to process conversation ${conv.name}: ${error.message}`);
+              }
+            }
+            
+            // After processing all conversations, navigate back to messaging list
+            console.log('🔄 Returning to messaging list...');
+            await monitoringPage.goto('https://www.linkedin.com/messaging/', {
+              waitUntil: 'domcontentloaded',
+              timeout: 15000,
+            });
+            
+            // Wait for page to stabilize
+            await this.wait(2000);
+            
+            // Re-setup the observer
+            const reObserverSetup = await setupObserver();
+            if (reObserverSetup.success) {
+              console.log(`✅ Observer re-established on: ${reObserverSetup.selector}`);
+            } else {
+              console.error('⚠️  Failed to re-establish observer');
+            }
+            
+            // Re-setup event listener (critical - gets lost on navigation)
+            await monitoringPage.evaluate((domFunctions) => {
+              domFunctions.reSetupMessageEventListener();
+            }, MessagingDOMFunctions);
+          }
+        } catch (error: any) {
+          console.error('❌ Message processing error:', error.message);
+        } finally {
+          isProcessing = false;
+        }
+      });
+
+      // Set up initial MutationObserver
+      const observerSetup = await setupObserver();
+
+      if (observerSetup.success) {
+        console.log(`✅ MutationObserver set up on: ${observerSetup.selector}`);
+      } else {
+        console.error('❌ Could not find conversation list element');
+        throw new Error('Conversation list element not found');
+      }
+
+      // Set up event listener in the page to call our exposed function
+      await monitoringPage.evaluate((domFunctions) => {
+        domFunctions.setupMessageEventListener();
+      }, MessagingDOMFunctions);
+
+      // Set up periodic refresh (every 15 minutes) as backup
+      const monitoringInterval = setInterval(async () => {
+        try {
+          console.log('🔄 Periodic refresh (backup check)...');
+          
+          if (monitoringPage.isClosed()) {
+            console.log('⚠️  Monitoring page closed, stopping monitoring');
+            clearInterval(monitoringInterval);
+            return;
+          }
+
+          // Reload the messaging page to ensure observer is still working
+          await monitoringPage.reload({ waitUntil: 'domcontentloaded' });
+          await this.wait(2000);
+
+          // Re-setup the observer after reload
+          await monitoringPage.evaluate(() => {
+            let conversationList = document.querySelector('#main > div > div.scaffold-layout__list-detail-inner.scaffold-layout__list-detail-inner--grow > div.scaffold-layout__list.msg__list > div.relative.display-flex.justify-center.flex-column.overflow-hidden.msg-conversations-container--inbox-shortcuts > ul');
+            
+            if (!conversationList) {
+              conversationList = document.querySelector('.msg-conversations-container__conversations-list') ||
+                               document.querySelector('ul[class*="msg-conversations"]') ||
+                               document.querySelector('.scaffold-layout__list ul');
+            }
+            
+            if (conversationList && !(window as any).messageObserver) {
+              console.log('✅ Re-establishing observer after reload, found:', conversationList.className);
+              
+              const observer = new MutationObserver((mutations) => {
+                console.log(`🔍 MutationObserver triggered (${mutations.length} mutations)`);
+                let hasUnreadChanges = false;
+                
+                for (const mutation of mutations) {
+                  console.log(`  Mutation type: ${mutation.type}, target:`, mutation.target);
+                  
+                  if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach((node) => {
+                      if (node.nodeType === Node.ELEMENT_NODE) {
+                        const element = node as HTMLElement;
+                        if (element.querySelector?.('.msg-conversation-card__unread-count') ||
+                            element.classList?.contains('msg-conversation-listitem')) {
+                          console.log('  ✅ Found unread badge or new conversation item');
+                          hasUnreadChanges = true;
+                        }
+                      }
+                    });
+                  } else if (mutation.type === 'attributes') {
+                    const target = mutation.target as HTMLElement;
+                    if (target.classList?.contains('msg-conversation-card__unread-count') ||
+                        target.querySelector?.('.msg-conversation-card__unread-count')) {
+                      console.log('  ✅ Unread badge attribute changed');
+                      hasUnreadChanges = true;
+                    }
+                  }
+                  
+                  if (hasUnreadChanges) break;
+                }
+
+                if (hasUnreadChanges) {
+                  console.log('🔔 New message detected by observer - triggering event');
+                  window.dispatchEvent(new CustomEvent('linkedin-new-message'));
+                }
+              });
+
+              observer.observe(conversationList, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+              });
+
+              console.log('👁️  Observer re-established successfully');
+              (window as any).messageObserver = observer;
+            } else if (!conversationList) {
+              console.error('❌ Could not find conversation list element after reload');
+            }
+          });
+
+          console.log('✓ Observer refreshed');
+        } catch (error: any) {
+          console.error('❌ Monitoring refresh error:', error.message);
+        }
+      }, 15 * 60 * 1000); // 15 minutes
+
+      // Store interval in session
+      SessionManager.updateSession(sessionId, {
+        monitoringInterval,
+      });
+
+      console.log('✅ Message monitoring started (refresh every 15 minutes)\n');
+      return { success: true, message: 'Message monitoring started' };
+    } catch (error: any) {
+      console.error('❌ Failed to start monitoring:', error.message);
+      throw new Error(`Failed to start monitoring: ${error.message}`);
+    }
+  }
+
+  /**
+   * Stop message monitoring
+   */
+  async stopMessageMonitoring(sessionId: string) {
+    const session = SessionManager.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    try {
+      console.log('🛑 Stopping message monitoring...');
+
+      if (session.monitoringInterval) {
+        clearInterval(session.monitoringInterval);
+      }
+
+      if (session.monitoringPage && !session.monitoringPage.isClosed()) {
+        await session.monitoringPage.close();
+      }
+
+      SessionManager.updateSession(sessionId, {
+        monitoringPage: undefined,
+        monitoringInterval: undefined,
+      });
+
+      console.log('✅ Message monitoring stopped\n');
+      return { success: true, message: 'Message monitoring stopped' };
+    } catch (error: any) {
+      console.error('❌ Failed to stop monitoring:', error.message);
+      throw new Error(`Failed to stop monitoring: ${error.message}`);
+    }
+  }
+
+  /**
+   * Extract profile URL from conversation URL
+   */
+  private async extractProfileUrlFromConversation(page: Page, conversationUrl: string): Promise<string | null> {
+    try {
+      // Navigate to conversation
+      const fullUrl = conversationUrl.startsWith('http') 
+        ? conversationUrl 
+        : `https://www.linkedin.com${conversationUrl}`;
+      
+      await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      await this.wait(2000); // Wait for conversation to fully load
+
+      // Extract profile URL from conversation header - try multiple selectors
+      const profileUrl = await page.evaluate(() => {
+        // Try different selectors for profile link
+        const selectors = [
+          '.msg-thread__link-to-profile',
+          'a[href*="/in/"]',
+          '.msg-entity-lockup__entity-title a',
+          '.msg-thread__topbar a[href*="/in/"]'
+        ];
+        
+        for (const selector of selectors) {
+          const link = document.querySelector(selector) as HTMLAnchorElement;
+          if (link && link.href && link.href.includes('/in/')) {
+            // Clean up the URL to get just the profile URL
+            const url = link.href.split('?')[0]; // Remove query params
+            return url;
+          }
+        }
+        
+        return null;
+      });
+
+      if (profileUrl) {
+        console.log(`    📍 Extracted profile URL: ${profileUrl}`);
+      }
+
+      return profileUrl;
+    } catch (error: any) {
+      console.error(`    ❌ Failed to extract profile URL: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Internal method to read conversation (used by monitoring)
+   */
+  private async readConversationInternal(page: Page, conversationUrl: string, profileUrl: string, forceCache: boolean = false) {
+    try {
+      const fullUrl = conversationUrl.startsWith('http') 
+        ? conversationUrl 
+        : `https://www.linkedin.com${conversationUrl}`;
+        
+      await page.goto(fullUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 30000,
+      });
+
+      await page.waitForSelector('.msg-s-message-list', { timeout: 10000 });
+      const messages = await page.evaluate(DOMFunctions.extractConversationMessages);
+
+      // Always cache when called from monitoring
+      if (forceCache && profileUrl) {
+        await this.cacheService.cacheConversation(profileUrl, messages);
+      }
+
+      return messages;
+    } catch (error: any) {
+      throw new Error(`Failed to read conversation: ${error.message}`);
     }
   }
 

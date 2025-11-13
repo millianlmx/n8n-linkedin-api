@@ -41,6 +41,16 @@ class SessionManager {
     const session = this.sessions.get(sessionId);
     if (session) {
       try {
+        // Clear monitoring interval if exists
+        if (session.monitoringInterval) {
+          clearInterval(session.monitoringInterval);
+        }
+        
+        // Close monitoring page if exists
+        if (session.monitoringPage && !session.monitoringPage.isClosed()) {
+          await session.monitoringPage.close();
+        }
+        
         await session.browser.close();
       } catch (error) {
         console.error('Error closing browser:', error);

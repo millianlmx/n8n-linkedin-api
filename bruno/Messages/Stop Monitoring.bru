@@ -1,0 +1,39 @@
+meta {
+  name: Stop Monitoring
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/messages/monitoring/stop
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "sessionId": "{{sessionId}}"
+  }
+}
+
+docs {
+  # Stop Message Monitoring
+  
+  Stops the automatic message monitoring for a session.
+  
+  ## Usage
+  Call this endpoint when you want to stop the background monitoring.
+  
+  ## Response
+  ```json
+  {
+    "success": true,
+    "message": "Message monitoring stopped"
+  }
+  ```
+  
+  ## Notes
+  - Monitoring automatically stops when the session is closed/logged out
+  - The monitoring browser tab will be closed
+  - The monitoring interval will be cleared
+}

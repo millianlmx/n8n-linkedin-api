@@ -7,6 +7,8 @@ export interface LinkedInSession {
   isAuthenticated: boolean;
   createdAt: Date;
   lastUsed: Date;
+  monitoringPage?: Page; // Dedicated page for message monitoring
+  monitoringInterval?: NodeJS.Timeout; // Interval for refreshing monitoring
 }
 
 export interface LoginRequest {
