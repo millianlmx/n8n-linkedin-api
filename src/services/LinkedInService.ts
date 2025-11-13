@@ -301,6 +301,143 @@ class LinkedInService {
         // Skip browser errors to avoid polluting logs
       });
       
+      // Inject the MessagingDOMFunctions into the page context BEFORE navigation
+      await monitoringPage.evaluateOnNewDocument(() => {
+        (window as any).MessagingDOMFunctions = {
+          processUnreadConversations: () => {
+            const convElements = document.querySelectorAll('.msg-conversation-listitem');
+            const unreadConvs: any[] = [];
+
+            convElements.forEach((conv) => {
+              const unreadBadge = conv.querySelector('.msg-conversation-card__unread-count');
+              
+              if (unreadBadge) {
+                const nameEl = conv.querySelector('.msg-conversation-listitem__participant-names');
+                const conversationCard = conv.querySelector('.msg-conversation-card');
+                const conversationId = conversationCard?.id || '';
+                
+                if (nameEl && conversationId) {
+                  const liId = conv.id;
+                  const convData = {
+                    name: nameEl.textContent?.trim() || '',
+                    elementId: liId,
+                    unreadCount: unreadBadge.textContent?.trim() || '1',
+                  };
+                  unreadConvs.push(convData);
+                }
+              }
+            });
+
+            return unreadConvs;
+          },
+
+          setupMessageObserver: () => {
+            if ((window as any).messageObserver) {
+              (window as any).messageObserver.disconnect();
+            }
+
+            let conversationList = document.querySelector('#main > div > div.scaffold-layout__list-detail-inner.scaffold-layout__list-detail-inner--grow > div.scaffold-layout__list.msg__list > div.relative.display-flex.justify-center.flex-column.overflow-hidden.msg-conversations-container--inbox-shortcuts > ul');
+            
+            if (!conversationList) {
+              conversationList = document.querySelector('.msg-conversations-container__conversations-list') ||
+                               document.querySelector('ul[class*="msg-conversations"]') ||
+                               document.querySelector('.scaffold-layout__list ul');
+            }
+            
+            if (conversationList) {
+              const observer = new MutationObserver((mutations) => {
+                let hasUnreadChanges = false;
+                
+                for (const mutation of mutations) {
+                  if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach((node) => {
+                      if (node.nodeType === Node.ELEMENT_NODE) {
+                        const element = node as HTMLElement;
+                        if (element.querySelector?.('.msg-conversation-card__unread-count') ||
+                            element.classList?.contains('msg-conversation-listitem')) {
+                          hasUnreadChanges = true;
+                        }
+                      }
+                    });
+                  } else if (mutation.type === 'attributes') {
+                    const target = mutation.target as HTMLElement;
+                    if (target.classList?.contains('msg-conversation-card__unread-count') ||
+                        target.querySelector?.('.msg-conversation-card__unread-count')) {
+                      hasUnreadChanges = true;
+                    }
+                  }
+                  
+                  if (hasUnreadChanges) break;
+                }
+
+                if (hasUnreadChanges) {
+                  window.dispatchEvent(new CustomEvent('linkedin-new-message'));
+                }
+              });
+
+              observer.observe(conversationList, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+              });
+
+              (window as any).messageObserver = observer;
+              
+              return {
+                success: true,
+                selector: conversationList.className || 'ul',
+                elementFound: true
+              };
+            } else {
+              return {
+                success: false,
+                selector: null,
+                elementFound: false
+              };
+            }
+          },
+
+          clickConversation: (elementId: string) => {
+            const convElement = document.getElementById(elementId);
+            if (convElement) {
+              const linkEl = convElement.querySelector('.msg-conversation-listitem__link');
+              if (linkEl) {
+                (linkEl as HTMLElement).click();
+                return true;
+              }
+            }
+            return false;
+          },
+
+          extractProfileUrl: () => {
+            const profileLink = document.querySelector('#thread-detail-jump-target > div > a');
+            if (profileLink) {
+              return profileLink.getAttribute('href');
+            }
+            return null;
+          },
+
+          setupMessageEventListener: () => {
+            (window as any).messageHandler = () => {
+              (window as any).handleNewMessage();
+            };
+            
+            window.addEventListener('linkedin-new-message', (window as any).messageHandler);
+          },
+
+          reSetupMessageEventListener: () => {
+            window.removeEventListener('linkedin-new-message', (window as any).messageHandler);
+            
+            (window as any).messageHandler = () => {
+              (window as any).handleNewMessage();
+            };
+            
+            window.addEventListener('linkedin-new-message', (window as any).messageHandler);
+          },
+        };
+      });
+
       // Navigate to messaging page (faster loading)
       await monitoringPage.goto('https://www.linkedin.com/messaging/', {
         waitUntil: 'domcontentloaded',
@@ -321,13 +458,13 @@ class LinkedInService {
 
       // Function to setup the observer (can be called multiple times)
       const setupObserver = async () => {
-        const observerSetup = await monitoringPage.evaluate((domFunctions) => {
+        const observerSetup = await monitoringPage.evaluate(() => {
           // Inject DOM functions into window
-          (window as any).processUnreadConversations = domFunctions.processUnreadConversations;
+          (window as any).processUnreadConversations = (window as any).MessagingDOMFunctions.processUnreadConversations;
           
           // Setup the observer
-          return domFunctions.setupMessageObserver();
-        }, MessagingDOMFunctions);
+          return (window as any).MessagingDOMFunctions.setupMessageObserver();
+        });
 
         return observerSetup;
       };
@@ -359,9 +496,9 @@ class LinkedInService {
                 console.log(`  📍 Processing: ${conv.name}`);
                 
                 // Click on the conversation to open it
-                await monitoringPage.evaluate((domFunctions, elementId) => {
-                  return domFunctions.clickConversation(elementId);
-                }, MessagingDOMFunctions, conv.elementId);
+                await monitoringPage.evaluate((elementId) => {
+                  return (window as any).MessagingDOMFunctions.clickConversation(elementId);
+                }, conv.elementId);
                 
                 // Wait for the conversation to load
                 await this.wait(2000);
@@ -371,9 +508,9 @@ class LinkedInService {
                 console.log(`  📍 Conversation URL: ${currentUrl}`);
                 
                 // Extract shortened profile URL from the thread detail section
-                const shortenedProfileUrl = await monitoringPage.evaluate((domFunctions) => {
-                  return domFunctions.extractProfileUrl();
-                }, MessagingDOMFunctions);
+                const shortenedProfileUrl = await monitoringPage.evaluate(() => {
+                  return (window as any).MessagingDOMFunctions.extractProfileUrl();
+                });
                 
                 if (!shortenedProfileUrl) {
                   console.log(`  ⚠️  Could not extract profile URL for: ${conv.name}`);
@@ -463,9 +600,9 @@ class LinkedInService {
             }
             
             // Re-setup event listener (critical - gets lost on navigation)
-            await monitoringPage.evaluate((domFunctions) => {
-              domFunctions.reSetupMessageEventListener();
-            }, MessagingDOMFunctions);
+            await monitoringPage.evaluate(() => {
+              (window as any).MessagingDOMFunctions.reSetupMessageEventListener();
+            });
           }
         } catch (error: any) {
           console.error('❌ Message processing error:', error.message);
@@ -485,9 +622,9 @@ class LinkedInService {
       }
 
       // Set up event listener in the page to call our exposed function
-      await monitoringPage.evaluate((domFunctions) => {
-        domFunctions.setupMessageEventListener();
-      }, MessagingDOMFunctions);
+      await monitoringPage.evaluate(() => {
+        (window as any).MessagingDOMFunctions.setupMessageEventListener();
+      });
 
       // Set up periodic refresh (every 15 minutes) as backup
       const monitoringInterval = setInterval(async () => {

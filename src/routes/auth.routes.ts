@@ -175,7 +175,7 @@ router.get('/session/:sessionId', (req: Request, res: Response) => {
  * Force mark a session as authenticated (workaround for timeout issues)
  * Body: { sessionId: string }
  */
-router.post('/force-authenticate', (req: Request, res: Response) => {
+router.post('/force-authenticate', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.body;
     
@@ -210,6 +210,15 @@ router.post('/force-authenticate', (req: Request, res: Response) => {
     SessionManager.updateSession(sessionId, {
       isAuthenticated: true,
     });
+    
+    // Automatically start message monitoring in a separate tab
+    console.log('🚀 Starting automatic message monitoring...');
+    try {
+      await LinkedInService.startMessageMonitoring(sessionId);
+      console.log('✅ Message monitoring started automatically');
+    } catch (monitoringError: any) {
+      console.warn(`⚠️  Failed to start automatic monitoring: ${monitoringError.message}`);
+    }
     
     res.json({
       success: true,
