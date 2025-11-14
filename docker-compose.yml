@@ -13,6 +13,7 @@ services:
       - CHROME_BIN=/usr/bin/chromium
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
       - DISPLAY=:99
+      - HEADLESS=true
       - DB_HOST=${DB_HOST:-linkedin-db}
       - DB_PORT=${DB_PORT:-5432}
       - DB_USER=${DB_USER:-postgres}
