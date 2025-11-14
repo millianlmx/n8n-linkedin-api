@@ -1,4 +1,4 @@
-import { LinkedInSession } from '../types';
+import { LinkedInSession, SessionSummary } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { Browser, Page } from 'puppeteer';
 
@@ -68,8 +68,14 @@ class SessionManager {
     }
   }
 
-  getAllSessions(): string[] {
-    return Array.from(this.sessions.keys());
+  getAllSessions(): SessionSummary[] {
+    return Array.from(this.sessions.values()).map(session => ({
+      id: session.id,
+      isAuthenticated: session.isAuthenticated,
+      createdAt: session.createdAt,
+      lastUsed: session.lastUsed,
+      currentUrl: session.page.url(),
+    }));
   }
 }
 

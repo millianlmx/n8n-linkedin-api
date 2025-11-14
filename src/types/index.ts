@@ -11,6 +11,14 @@ export interface LinkedInSession {
   monitoringInterval?: NodeJS.Timeout; // Interval for refreshing monitoring
 }
 
+export interface SessionSummary {
+  id: string;
+  isAuthenticated: boolean;
+  createdAt: Date;
+  lastUsed: Date;
+  currentUrl: string;
+}
+
 export interface LoginRequest {
   email?: string;
   password?: string;

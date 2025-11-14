@@ -45,6 +45,12 @@ export class Login implements INodeType {
 						description: 'Logout and close browser session',
 						action: 'Logout and close browser session',
 					},
+					{
+						name: 'Get Active Sessions',
+						value: 'getActiveSessions',
+						description: 'Retrieve the list of active sessions',
+						action: 'Get active sessions',
+					},
 				],
 				default: 'login',
 			},
@@ -183,6 +189,23 @@ export class Login implements INodeType {
 						success: logoutResponse.success || true,
 						sessionId: sessionId,
 						message: logoutResponse.message || 'Successfully logged out',
+						timestamp: new Date().toISOString(),
+					};
+				} else if (operation === 'getActiveSessions') {
+					// Call endpoint to get active sessions
+					const sessionsResponse = await this.helpers.httpRequest({
+						method: 'GET',
+						url: `${baseUrl}/api/auth/sessions`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						json: true,
+					});
+
+					// Return active sessions
+					responseData = {
+						success: true,
+						sessions: sessionsResponse.sessions || [],
 						timestamp: new Date().toISOString(),
 					};
 				}
