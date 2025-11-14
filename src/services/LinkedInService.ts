@@ -124,6 +124,13 @@ class LinkedInService {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-blink-features=AutomationControlled',
+          '--disable-dev-shm-usage', // Overcome limited resource problems in containers
+          '--disable-gpu', // Not needed in headless mode
+          '--disable-software-rasterizer',
+          '--disable-extensions',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process', // Required for some container environments
         ],
         defaultViewport: {
           width: 1366,

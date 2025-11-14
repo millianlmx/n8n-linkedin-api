@@ -36,9 +36,14 @@ RUN apt-get update && apt-get install -y \
 ENV CHROME_BIN=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV DISPLAY=:99
 
 # Create app directory
 WORKDIR /usr/src/app
+
+# Create directory for browser data with proper permissions
+RUN mkdir -p /usr/src/app/.browser-data && \
+    chmod 777 /usr/src/app/.browser-data
 
 # Copy package files
 COPY package*.json ./
@@ -52,8 +57,32 @@ COPY . .
 # Build TypeScript to JavaScript
 RUN npm run build
 
+# Create startup script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+echo "🚀 Starting LinkedIn API container..."\n\
+\n\
+# Start Xvfb (virtual display) in background\n\
+echo "📺 Starting Xvfb virtual display..."\n\
+Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &\n\
+XVFB_PID=$!\n\
+sleep 2\n\
+\n\
+# Verify Xvfb is running\n\
+if ps -p $XVFB_PID > /dev/null; then\n\
+  echo "✅ Xvfb started successfully (PID: $XVFB_PID)"\n\
+else\n\
+  echo "❌ Failed to start Xvfb"\n\
+  exit 1\n\
+fi\n\
+\n\
+# Start the Node.js application\n\
+echo "🎯 Starting Node.js application..."\n\
+exec node dist/src/server.js' > /usr/src/app/start.sh && \
+    chmod +x /usr/src/app/start.sh
+
 # Expose API port
 EXPOSE 8080
 
-# Start the production server
-CMD ["npm", "start"]
+# Start with the startup script
+CMD ["/usr/src/app/start.sh"]
