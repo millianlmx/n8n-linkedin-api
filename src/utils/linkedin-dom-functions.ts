@@ -480,30 +480,34 @@ export function clickConversationItem(index: number) {
 // ============================================================================
 
 export function checkConnectionStatus() {
-  // Check if "En attente" (Pending) button exists
-  const pendingButton = document.querySelector('button[aria-label*="En attente"]') || 
-                        document.querySelector('button[aria-label*="Pending"]');
-  
-  if (pendingButton) {
-    return { status: 'pending', connected: false };
-  }
-  
-  // Check if user is 1st degree connection
-  const degreeEl = document.querySelector('.distance-badge .dist-value');
-  const degree = degreeEl?.textContent?.trim() || '';
-  
-  if (degree === '1er' || degree === '1st') {
+  console.log('--- Checking Connection Status ---');
+
+  // Check for 1st degree connection
+  const degreeEl = document.querySelector('.distance-badge .dist-value, .dist-value');
+  const degreeText = degreeEl?.textContent?.trim();
+  console.log('Degree element found:', !!degreeEl, 'Text:', degreeText);
+  if (degreeText === '1er' || degreeText === '1st') {
+    console.log('Status determined: connected (1st degree)');
     return { status: 'connected', connected: true };
   }
-  
-  // Check if connect button exists (not connected)
-  const connectButton = document.querySelector('button[aria-label*="Invitez"]') ||
-                        document.querySelector('button[aria-label*="Connect"]');
-  
+
+  // Check for pending connection
+  const pendingButton = document.querySelector('button[aria-label*="En attente"], button[aria-label*="Pending"]');
+  console.log('Pending button found:', !!pendingButton);
+  if (pendingButton) {
+    console.log('Status determined: pending');
+    return { status: 'pending', connected: false };
+  }
+
+  // Check for connect button
+  const connectButton = document.querySelector('button[aria-label*="Invitez"], button[aria-label*="Connect"]');
+  console.log('Connect button found:', !!connectButton);
   if (connectButton) {
+    console.log('Status determined: not_connected');
     return { status: 'not_connected', connected: false };
   }
-  
+
+  console.log('--- Connection status could not be determined ---');
   return { status: 'unknown', connected: false };
 }
 
