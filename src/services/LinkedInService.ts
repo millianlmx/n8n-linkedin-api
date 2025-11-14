@@ -31,6 +31,46 @@ class LinkedInService {
   }
 
   /**
+   * Switch to the operation page (main page) for performing LinkedIn actions
+   * If monitoring is active, this brings the operation page to the front
+   * @param sessionId - Session identifier
+   * @private
+   */
+  private async switchToOperationPage(sessionId: string): Promise<void> {
+    const session = SessionManager.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    // If monitoring page exists, bring the operation page to front
+    if (session.monitoringPage && !session.monitoringPage.isClosed()) {
+      console.log('🔄 Switching to operation tab...');
+      await session.page.bringToFront();
+      await this.wait(300); // Small delay for tab switch
+    }
+  }
+
+  /**
+   * Switch back to the monitoring page after completing an operation
+   * If monitoring is active, this brings the monitoring page to the front
+   * @param sessionId - Session identifier
+   * @private
+   */
+  private async switchToMonitoringPage(sessionId: string): Promise<void> {
+    const session = SessionManager.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    // If monitoring page exists, bring it back to front
+    if (session.monitoringPage && !session.monitoringPage.isClosed()) {
+      console.log('🔄 Switching back to monitoring tab...');
+      await session.monitoringPage.bringToFront();
+      await this.wait(300); // Small delay for tab switch
+    }
+  }
+
+  /**
    * Finds the Chrome/Chromium executable path on the system
    * @returns Path to Chrome executable or null if not found
    * @private
@@ -851,6 +891,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Switch to operation page
+      await this.switchToOperationPage(sessionId);
+
       console.log(`📖 Scraping profile: ${request.url}`);
       
       // Navigate to profile with domcontentloaded (faster than networkidle2)
@@ -882,9 +925,14 @@ class LinkedInService {
       // Save to cache
       await this.cacheService.cacheProfile(request.url, profileData);
 
+      // Switch back to monitoring page
+      await this.switchToMonitoringPage(sessionId);
+
       return { success: true, data: profileData };
     } catch (error: any) {
       console.error('❌ Profile scraping failed:', error.message);
+      // Switch back to monitoring page even on error
+      await this.switchToMonitoringPage(sessionId);
       throw new Error(`Profile scraping failed: ${error.message}`);
     }
   }
@@ -1097,6 +1145,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Switch to operation page
+      await this.switchToOperationPage(sessionId);
+
       console.log(`📖 Reading conversation: ${conversationUrl}`);
       
       // Navigate to the conversation (conversationUrl is always a full URL)
@@ -1145,9 +1196,14 @@ class LinkedInService {
         }
       }
       
+      // Switch back to monitoring page
+      await this.switchToMonitoringPage(sessionId);
+
       return { success: true, data: messages, cached: false, cacheUpdated };
     } catch (error: any) {
       console.error('❌ Failed to read conversation:', error.message);
+      // Switch back to monitoring page even on error
+      await this.switchToMonitoringPage(sessionId);
       throw new Error(`Failed to read conversation: ${error.message}`);
     }
   }
@@ -1161,6 +1217,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Switch to operation page
+      await this.switchToOperationPage(sessionId);
+
       console.log(`💬 Sending message to: ${request.conversationUrl}`);
       
       // Navigate to the conversation
@@ -1252,9 +1311,15 @@ class LinkedInService {
       await this.wait(2000);
 
       console.log('✅ Message sent successfully\n');
+
+      // Switch back to monitoring page
+      await this.switchToMonitoringPage(sessionId);
+
       return { success: true, message: 'Message sent successfully' };
     } catch (error: any) {
       console.error('❌ Failed to send message:', error.message);
+      // Switch back to monitoring page even on error
+      await this.switchToMonitoringPage(sessionId);
       throw new Error(`Failed to send message: ${error.message}`);
     }
   }
@@ -1268,6 +1333,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Switch to operation page
+      await this.switchToOperationPage(sessionId);
+
       console.log(`👀 Visiting profile: ${profileUrl}`);
       
       // Navigate to profile with domcontentloaded (faster)
@@ -1311,9 +1379,15 @@ class LinkedInService {
       });
 
       console.log('✅ Profile visited\n');
+
+      // Switch back to monitoring page
+      await this.switchToMonitoringPage(sessionId);
+
       return { success: true, message: 'Profile visited' };
     } catch (error: any) {
       console.error('❌ Failed to visit profile:', error.message);
+      // Switch back to monitoring page even on error
+      await this.switchToMonitoringPage(sessionId);
       throw new Error(`Failed to visit profile: ${error.message}`);
     }
   }
@@ -1327,6 +1401,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Switch to operation page
+      await this.switchToOperationPage(sessionId);
+
       console.log(`🤝 Sending connection request to: ${profileUrl}`);
       
       // Navigate to profile
@@ -1519,9 +1596,14 @@ class LinkedInService {
       // Wait briefly for confirmation
       await this.wait(300);
 
+      // Switch back to monitoring page
+      await this.switchToMonitoringPage(sessionId);
+
       return { success: true, message: 'Connection request sent' };
     } catch (error: any) {
       console.error('❌ Failed to send connection request:', error.message);
+      // Switch back to monitoring page even on error
+      await this.switchToMonitoringPage(sessionId);
       throw new Error(`Failed to send connection request: ${error.message}`);
     }
   }
@@ -1535,6 +1617,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Switch to operation page
+      await this.switchToOperationPage(sessionId);
+
       console.log('👁️  Fetching profile views...');
       
       // Navigate to own profile
@@ -1549,6 +1634,10 @@ class LinkedInService {
       const profileData = await page.evaluate(DOMFunctions.extractProfileViews);
 
       console.log(`✅ Your profile: ${profileData.name}\n`);
+
+      // Switch back to monitoring page
+      await this.switchToMonitoringPage(sessionId);
+
       return { 
         success: true, 
         data: {
@@ -1557,6 +1646,8 @@ class LinkedInService {
       };
     } catch (error: any) {
       console.error('❌ Failed to get profile views:', error.message);
+      // Switch back to monitoring page even on error
+      await this.switchToMonitoringPage(sessionId);
       throw new Error(`Failed to get profile views: ${error.message}`);
     }
   }
