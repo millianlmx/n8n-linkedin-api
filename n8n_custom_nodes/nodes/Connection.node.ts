@@ -119,6 +119,7 @@ export class Connection implements INodeType {
 						},
 						body,
 						json: true,
+						timeout: 60000, // 1 minute timeout
 					});
 
 					responseData = response;

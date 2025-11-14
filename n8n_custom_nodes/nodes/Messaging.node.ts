@@ -233,6 +233,7 @@ export class Messaging implements INodeType {
 						},
 						qs: queryParams,
 						json: true,
+						timeout: 60000, // 1 minute timeout
 					});
 
 					responseData = response;
@@ -269,6 +270,7 @@ export class Messaging implements INodeType {
 							profileUrl,
 						},
 						json: true,
+						timeout: 120000, // 2 minutes timeout for this operation
 					});
 
 					responseData = response;

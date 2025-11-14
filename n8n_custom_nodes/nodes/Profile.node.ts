@@ -109,6 +109,7 @@ export class Profile implements INodeType {
 							url,
 						},
 						json: true,
+						timeout: 60000, // 1 minute timeout
 					});
 
 					responseData = response;
@@ -126,6 +127,7 @@ export class Profile implements INodeType {
 							url,
 						},
 						json: true,
+						timeout: 60000, // 1 minute timeout
 					});
 
 					responseData = response;

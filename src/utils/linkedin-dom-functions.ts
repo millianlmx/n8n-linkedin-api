@@ -481,21 +481,7 @@ export function clickConversationItem(index: number) {
 
 export function checkConnectionStatus() {
   console.log('--- Checking Connection Status ---');
-
-  // First, check if we're on a login page or modal
-  const passwordField = document.querySelector('input[type="password"]');
-  const loginForm = document.querySelector('form[data-id="sign-in-form"]');
-  const languageSelector = document.querySelector('button[aria-label*="العربية"]') || 
-                          document.querySelector('button[aria-label*="English"]');
-  
-  if (passwordField || loginForm || languageSelector) {
-    console.log('❌ ERROR: Detected login page or authentication modal!');
-    console.log('   Password field:', !!passwordField);
-    console.log('   Login form:', !!loginForm);
-    console.log('   Language selector:', !!languageSelector);
-    console.log('   Current URL:', window.location.href);
-    return { status: 'not_authenticated', connected: false };
-  }
+  console.log('Current URL:', window.location.href);
 
   // Debug: Log all buttons with their aria-labels to understand what's available
   const allButtons = Array.from(document.querySelectorAll('button'));
@@ -509,6 +495,32 @@ export function checkConnectionStatus() {
     }));
   
   console.log('Buttons with aria-label:', JSON.stringify(buttonsWithAriaLabel, null, 2));
+
+  // Check if we're on a login/auth page by detecting multiple language selector buttons
+  const languageButtons = buttonsWithAriaLabel.filter(btn => 
+    btn.label && (
+      btn.label.includes('العربية') ||
+      btn.label.includes('English') ||
+      btn.label.includes('Français') ||
+      btn.label.includes('Español') ||
+      btn.label.includes('Deutsch')
+    )
+  );
+  
+  // Also check for password field visibility buttons
+  const passwordButtons = buttonsWithAriaLabel.filter(btn =>
+    btn.label && (
+      btn.label.includes('mot de passe') ||
+      btn.label.includes('password')
+    )
+  );
+  
+  if (languageButtons.length >= 3 || passwordButtons.length >= 3) {
+    console.log('❌ ERROR: Detected login/auth page!');
+    console.log(`   Found ${languageButtons.length} language buttons`);
+    console.log(`   Found ${passwordButtons.length} password field buttons`);
+    return { status: 'not_authenticated', connected: false };
+  }
 
   // Check for 1st degree connection via degree badge
   // Try multiple selectors as LinkedIn's DOM structure varies

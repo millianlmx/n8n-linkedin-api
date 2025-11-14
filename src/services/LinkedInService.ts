@@ -1737,6 +1737,10 @@ class LinkedInService {
         timeout: 10000,
       });
 
+      // Log current URL to verify navigation
+      const currentUrl = page.url();
+      console.log(`  📍 Current URL after navigation: ${currentUrl}`);
+
       // Wait for profile to load
       await Promise.race([
         page.waitForSelector('.ph5.pb5', { timeout: 4000 }),
