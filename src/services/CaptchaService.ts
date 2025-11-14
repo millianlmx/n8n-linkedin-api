@@ -111,6 +111,211 @@ export class CaptchaService {
   }
 
   /**
+   * Inject CSS to fix reCAPTCHA iframe sizing issues
+   */
+  private async fixRecaptchaIframeSize(page: Page): Promise<void> {
+    try {
+      console.log('🎨 Injecting CSS to fix reCAPTCHA iframe size...');
+      
+      // Inject CSS in the main page to fix iframe sizing
+      await page.evaluate(() => {
+        const style = document.createElement('style');
+        style.textContent = `
+          /* Scale up the reCAPTCHA iframe container */
+          iframe[src*="recaptcha/api2/bframe"] {
+            width: 600px !important;
+            height: 800px !important;
+            min-width: 600px !important;
+            min-height: 800px !important;
+            transform: scale(1.5) !important;
+            transform-origin: top left !important;
+            border: 2px solid #4285f4 !important;
+          }
+          
+          iframe[src*="recaptcha/api2/anchor"] {
+            width: 304px !important;
+            height: 78px !important;
+          }
+          
+          /* Ensure parent containers don't constrain the iframe */
+          iframe[src*="recaptcha"] {
+            max-width: none !important;
+            max-height: none !important;
+            position: relative !important;
+            z-index: 10000 !important;
+          }
+        `;
+        document.head.appendChild(style);
+        console.log('✅ CSS injected to main page');
+      });
+      
+      // Also inject minimal CSS inside the bframe iframe to ensure visibility
+      const frames = page.frames();
+      for (const frame of frames) {
+        const frameUrl = frame.url();
+        if (frameUrl.includes('recaptcha') && frameUrl.includes('bframe')) {
+          await frame.evaluate(() => {
+            const style = document.createElement('style');
+            style.textContent = `
+              /* Ensure containers are visible and not clipped */
+              #rc-imageselect {
+                overflow: visible !important;
+              }
+              
+              .rc-imageselect-payload {
+                overflow: visible !important;
+              }
+              
+              .rc-imageselect-challenge {
+                overflow: visible !important;
+              }
+              
+              /* Ensure images load properly */
+              .rc-image-tile-wrapper img {
+                display: block !important;
+              }
+            `;
+            document.head.appendChild(style);
+            console.log('✅ CSS injected to bframe iframe');
+          });
+          console.log('✅ reCAPTCHA iframe CSS fixed');
+        }
+      }
+      
+      // Wait a bit for CSS to apply
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+    } catch (error: any) {
+      console.warn('⚠️  Failed to inject CSS:', error.message);
+    }
+  }
+
+  /**
+   * Extract CAPTCHA parameters from the challenge iframe
+   * Based on utils/initCaptchaParamsExtractor.js from the reference implementation
+   */
+  private async extractCaptchaParams(page: Page): Promise<{
+    body: string;
+    comment: string;
+    rows: number;
+    columns: number;
+  } | null> {
+    try {
+      // Find the bframe (challenge iframe)
+      const frames = page.frames();
+      for (const frame of frames) {
+        const frameUrl = frame.url();
+        if (frameUrl.includes('recaptcha') && frameUrl.includes('bframe')) {
+          console.log('📋 Found challenge iframe, applying CSS fixes...');
+          
+          // Apply CSS fixes now that we found the iframe
+          await this.fixRecaptchaIframeSize(page);
+          
+          console.log('📋 Extracting CAPTCHA parameters from challenge iframe...');
+          
+          // Wait for the image to load with longer timeout
+          try {
+            await frame.waitForSelector('.rc-image-tile-wrapper img', { timeout: 10000 });
+            console.log('✅ Image element found in iframe');
+          } catch (e) {
+            console.warn('⚠️  Image element not found, trying alternative selectors...');
+            // Try alternative selector
+            await frame.waitForSelector('img.rc-image-tile-44, img.rc-image-tile-33', { timeout: 5000 });
+          }
+          
+          const params = await frame.evaluate(async () => {
+            // Extract the instruction text
+            const descWrapper = document.querySelector('.rc-imageselect-desc-wrapper');
+            const comment = descWrapper ? descWrapper.textContent?.replace(/\n/g, ' ').trim() : '';
+            
+            // Extract the grid size
+            const table = document.querySelector('.rc-imageselect-table-33, .rc-imageselect-table-44');
+            let rows = 3;
+            let columns = 3;
+            
+            if (table) {
+              if (table.classList.contains('rc-imageselect-table-44')) {
+                rows = 4;
+                columns = 4;
+              }
+            }
+            
+            // Extract the image and convert to base64 if needed
+            const img = document.querySelector('.rc-image-tile-wrapper img') as HTMLImageElement;
+            let body = '';
+            
+            if (img) {
+              // Wait for image to load
+              if (!img.complete) {
+                await new Promise((resolve) => {
+                  img.onload = resolve;
+                  img.onerror = resolve;
+                  // Timeout after 5 seconds
+                  setTimeout(resolve, 5000);
+                });
+              }
+              
+              // If already base64, use it directly
+              if (img.src.startsWith('data:image')) {
+                body = img.src;
+              } else {
+                // Otherwise, convert to base64
+                try {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = img.naturalWidth || img.width || 400;
+                  canvas.height = img.naturalHeight || img.height || 400;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(img, 0, 0);
+                    body = canvas.toDataURL('image/png');
+                  }
+                } catch (e) {
+                  console.error('Failed to convert image to base64:', e);
+                  // Fallback: try to fetch the image and convert
+                  try {
+                    const response = await fetch(img.src);
+                    const blob = await response.blob();
+                    const reader = new FileReader();
+                    body = await new Promise((resolve) => {
+                      reader.onloadend = () => resolve(reader.result as string);
+                      reader.readAsDataURL(blob);
+                    });
+                  } catch (fetchError) {
+                    console.error('Failed to fetch image:', fetchError);
+                    body = img.src; // Last resort fallback
+                  }
+                }
+              }
+            }
+            
+            return { body, comment, rows, columns };
+          });
+          
+          if (params.body && params.comment) {
+            console.log(`   Instructions: "${params.comment}"`);
+            console.log(`   Grid size: ${params.rows}x${params.columns}`);
+            const isBase64 = params.body.startsWith('data:image');
+            console.log(`   Image format: ${isBase64 ? 'base64' : 'URL'}`);
+            console.log(`   Image data length: ${params.body.length} chars`);
+            if (isBase64) {
+              console.log(`   ✅ Image successfully converted to base64`);
+            } else {
+              console.warn(`   ⚠️  Image is still a URL, may cause issues with 2Captcha`);
+            }
+            return params;
+          }
+        }
+      }
+      
+      console.error('❌ Could not find challenge iframe or extract parameters');
+      return null;
+    } catch (error: any) {
+      console.error('❌ Failed to extract CAPTCHA parameters:', error.message);
+      return null;
+    }
+  }
+
+  /**
    * Solve reCAPTCHA v2 and return the solution (either token or click coordinates)
    */
   async solveRecaptchaWithClicks(page: Page): Promise<{ type: 'token' | 'clicks', data: string | number[] } | null> {
@@ -129,22 +334,24 @@ export class CaptchaService {
         return null;
       }
       
-      // Extract site key
-      const siteKey = await this.extractSiteKey(page);
-      if (!siteKey) {
-        console.error('❌ Could not extract reCAPTCHA site key');
+      // Extract CAPTCHA parameters (image, instructions, grid size)
+      const captchaParams = await this.extractCaptchaParams(page);
+      if (!captchaParams) {
+        console.error('❌ Could not extract CAPTCHA parameters');
         return null;
       }
       
-      console.log(`🔑 Found reCAPTCHA site key: ${siteKey.substring(0, 20)}...`);
-      console.log('🤖 Sending CAPTCHA to 2Captcha for solving...');
+      console.log('🤖 Sending CAPTCHA to 2Captcha for solving (grid method)...');
       console.log('⏳ This may take 30-90 seconds...');
       
-      // Use the 2Captcha solver
-      const pageUrl = page.url();
-      const result = await this.solver.recaptcha({
-        pageurl: pageUrl,
-        googlekey: siteKey,
+      // Use the grid solver for click-based solving
+      const result = await this.solver.grid({
+        body: captchaParams.body,
+        textinstructions: captchaParams.comment,
+        cols: captchaParams.columns,
+        rows: captchaParams.rows,
+        recaptcha: 1, // Required parameter to indicate this is a reCAPTCHA grid
+        lang: 'en', // or 'fr' if you want French instructions
       });
       
       const solution = result.data;
@@ -573,36 +780,56 @@ export class CaptchaService {
         if (!checkboxAlreadyClicked) {
           console.log('🖱️  Clicking reCAPTCHA checkbox to trigger challenge...');
           try {
-            const frames = page.frames();
-            let checkboxClicked = false;
+            // Find the reCAPTCHA badge iframe using the title attribute
+            const iframeElementHandle = await page.$('iframe[title="reCAPTCHA"]');
             
-            for (const frame of frames) {
-              const frameUrl = frame.url();
-              if (frameUrl.includes('recaptcha') && frameUrl.includes('anchor')) {
-                console.log('Found reCAPTCHA anchor iframe');
+            if (iframeElementHandle) {
+              const recaptchaBadgeIframe = await iframeElementHandle.contentFrame();
+              
+              if (recaptchaBadgeIframe) {
+                console.log('Found reCAPTCHA badge iframe');
                 
-                try {
-                  await frame.waitForSelector('.recaptcha-checkbox-border', { timeout: 5000 });
-                  await frame.click('.recaptcha-checkbox-border');
-                  console.log('✅ Clicked reCAPTCHA checkbox');
-                  checkboxClicked = true;
-                  checkboxAlreadyClicked = true;
-                  break;
-                } catch (e) {
-                  console.log('Could not click checkbox (may already be clicked)');
-                  checkboxAlreadyClicked = true; // Assume it's already clicked
+                // Click on checkbox reCAPTCHA using evaluate (more reliable than frame.click)
+                const clicked = await recaptchaBadgeIframe.evaluate(() => {
+                  const recaptchaCheckbox = document.querySelector('span.recaptcha-checkbox-unchecked');
+                  if (recaptchaCheckbox) {
+                    (recaptchaCheckbox as HTMLElement).click();
+                    return true;
+                  }
+                  return false;
+                });
+                
+                if (clicked) {
+                  console.log('✅ Clicked reCAPTCHA checkbox via evaluate');
+                } else {
+                  console.log('⚠️  Checkbox already checked or not found');
                 }
+                
+                checkboxAlreadyClicked = true;
+                
+                // Wait longer for image challenge to appear
+                console.log('⏳ Waiting 8 seconds for image challenge to appear...');
+                await new Promise(resolve => setTimeout(resolve, 8000));
+                
+                // Check if challenge appeared
+                const challengeAppeared = await page.evaluate(() => {
+                  const frames = Array.from(document.querySelectorAll('iframe'));
+                  return frames.some(iframe => iframe.src.includes('bframe'));
+                });
+                
+                if (challengeAppeared) {
+                  console.log('✅ Image challenge iframe detected');
+                } else {
+                  console.warn('⚠️  Image challenge iframe not detected yet');
+                }
+              } else {
+                console.warn('⚠️  Could not access reCAPTCHA badge iframe content');
+                checkboxAlreadyClicked = true;
               }
-            }
-            
-            if (!checkboxClicked) {
-              console.warn('⚠️  Could not click checkbox - image challenge may already be visible');
+            } else {
+              console.warn('⚠️  Could not find reCAPTCHA badge iframe - image challenge may already be visible');
               checkboxAlreadyClicked = true;
             }
-            
-            // Wait for image challenge to appear
-            console.log('⏳ Waiting for image challenge to appear...');
-            await new Promise(resolve => setTimeout(resolve, 3000));
             
           } catch (e) {
             console.log('Error clicking checkbox:', e);
@@ -611,10 +838,10 @@ export class CaptchaService {
         } else {
           console.log('ℹ️  Skipping checkbox click - already clicked in previous attempt');
           console.log('⏳ Waiting for new image challenge to load...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
         
-        // STEP 2: Solve the CAPTCHA
+        // STEP 2: Solve the CAPTCHA (CSS injection happens inside extractCaptchaParams)
         const solution = await this.solveRecaptchaWithClicks(page);
         if (!solution) {
           // Take screenshot on failure
@@ -629,7 +856,7 @@ export class CaptchaService {
           continue; // Try again
         }
         
-        // STEP 3: Apply the solution based on type
+        // STEP 4: Apply the solution based on type
         if (solution.type === 'clicks') {
           // Click-based solution: click on specific cells using coordinates
           console.log('🖱️  Applying click-based solution...');
@@ -652,20 +879,20 @@ export class CaptchaService {
               } else {
                 console.log(`Iframe position: x=${boundingBox.x}, y=${boundingBox.y}, width=${boundingBox.width}, height=${boundingBox.height}`);
                 
-                // Click on each cell using calculated coordinates
-                for (const cellNumber of cells) {
+                // Click on each cell using calculated coordinates with proper delays
+                const timeToSleep = 100; // ms delay between clicks
+                
+                for (let i = 0; i < cells.length; i++) {
+                  const cellNumber = cells[i];
                   const coords = this.calculateCellCoordinates(boundingBox, cellNumber, 3);
                   
                   if (coords) {
-                    console.log(`\n🎯 Preparing to click cell ${cellNumber} at coordinates x=${coords.x}, y=${coords.y}`);
-                    console.log(`⏳ Waiting 3 seconds for visual debugging...`);
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    // Add delay before each click (increases with each click)
+                    await new Promise(resolve => setTimeout(resolve, timeToSleep * i));
                     
+                    console.log(`🎯 Clicking cell ${cellNumber} at coordinates x=${coords.x}, y=${coords.y}`);
                     await page.mouse.click(coords.x, coords.y);
                     console.log(`✅ Clicked cell ${cellNumber}`);
-                    
-                    console.log(`⏳ Waiting 2 seconds before next click...`);
-                    await new Promise(resolve => setTimeout(resolve, 2000));
                   }
                 }
                 
