@@ -8,8 +8,8 @@ describe('SessionManager', () => {
   beforeEach(() => {
     // Clear all sessions before each test
     const allSessions = SessionManager.getAllSessions();
-    allSessions.forEach(sessionId => {
-      SessionManager.deleteSession(sessionId);
+    allSessions.forEach(session => {
+      SessionManager.deleteSession(session.id);
     });
 
     // Create mock browser and page
