@@ -118,7 +118,7 @@ class LinkedInService {
     
     try {
       const browser = await puppeteer.launch({
-        headless: true,
+        headless: false,
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
@@ -132,6 +132,13 @@ class LinkedInService {
       });
 
       const page = await browser.newPage();
+      
+      // Forward console logs from browser to Node.js console
+      page.on('console', (msg) => {
+        const type = msg.type();
+        const text = msg.text();
+        if (type === 'log') console.log(`[Browser] ${text}`);
+      });
       
       // Set user agent to match real browser
       await page.setUserAgent(

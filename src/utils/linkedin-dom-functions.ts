@@ -482,32 +482,70 @@ export function clickConversationItem(index: number) {
 export function checkConnectionStatus() {
   console.log('--- Checking Connection Status ---');
 
-  // Check for 1st degree connection
-  const degreeEl = document.querySelector('.distance-badge .dist-value, .dist-value');
+  // Debug: Log all buttons with their aria-labels to understand what's available
+  const allButtons = Array.from(document.querySelectorAll('button'));
+  console.log(`Found ${allButtons.length} total buttons on page`);
+  
+  const buttonsWithAriaLabel = allButtons
+    .filter(btn => btn.getAttribute('aria-label'))
+    .map(btn => ({
+      label: btn.getAttribute('aria-label'),
+      text: btn.textContent?.trim().substring(0, 50) // First 50 chars
+    }));
+  
+  console.log('Buttons with aria-label:', JSON.stringify(buttonsWithAriaLabel, null, 2));
+
+  // Check for 1st degree connection via degree badge
+  // Try multiple selectors as LinkedIn's DOM structure varies
+  const degreeEl = document.querySelector('.distance-badge .dist-value') || 
+                   document.querySelector('.dist-value') ||
+                   document.querySelector('[class*="dist-value"]');
   const degreeText = degreeEl?.textContent?.trim();
   console.log('Degree element found:', !!degreeEl, 'Text:', degreeText);
+  
   if (degreeText === '1er' || degreeText === '1st') {
-    console.log('Status determined: connected (1st degree)');
+    console.log('✅ Status determined: connected (1st degree)');
     return { status: 'connected', connected: true };
   }
+  
+  // Note: We don't check for Message button because Premium users can message anyone
+  // This would give false positives for Premium accounts
 
   // Check for pending connection
-  const pendingButton = document.querySelector('button[aria-label*="En attente"], button[aria-label*="Pending"]');
-  console.log('Pending button found:', !!pendingButton);
+  const pendingButton = allButtons.find(btn => {
+    const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || '';
+    const text = btn.textContent?.toLowerCase() || '';
+    return ariaLabel.includes('pending') || 
+           ariaLabel.includes('en attente') ||
+           text.includes('pending') ||
+           text.includes('en attente');
+  });
+  
   if (pendingButton) {
-    console.log('Status determined: pending');
+    console.log('⏳ Status determined: pending');
+    console.log('   Button aria-label:', pendingButton.getAttribute('aria-label'));
     return { status: 'pending', connected: false };
   }
 
   // Check for connect button
-  const connectButton = document.querySelector('button[aria-label*="Invitez"], button[aria-label*="Connect"]');
-  console.log('Connect button found:', !!connectButton);
+  const connectButton = allButtons.find(btn => {
+    const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || '';
+    const text = btn.textContent?.toLowerCase() || '';
+    return ariaLabel.includes('connect') || 
+           ariaLabel.includes('inviter') ||
+           ariaLabel.includes('invitez') ||
+           text.includes('connect') ||
+           text.includes('se connecter');
+  });
+  
   if (connectButton) {
-    console.log('Status determined: not_connected');
+    console.log('❌ Status determined: not_connected');
+    console.log('   Button aria-label:', connectButton.getAttribute('aria-label'));
     return { status: 'not_connected', connected: false };
   }
 
-  console.log('--- Connection status could not be determined ---');
+  console.log('⚠️  Connection status could not be determined');
+  console.log('   No matching buttons found for: message, pending, or connect');
   return { status: 'unknown', connected: false };
 }
 
