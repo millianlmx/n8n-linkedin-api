@@ -127,8 +127,8 @@ setInterval(() => {
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, closing server...');
   const sessions = SessionManager.getAllSessions();
-  for (const sessionId of sessions) {
-    await SessionManager.deleteSession(sessionId);
+  for (const session of sessions) {
+    await SessionManager.deleteSession(session.id);
   }
   process.exit(0);
 });
@@ -136,8 +136,8 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   console.log('SIGINT received, closing server...');
   const sessions = SessionManager.getAllSessions();
-  for (const sessionId of sessions) {
-    await SessionManager.deleteSession(sessionId);
+  for (const session of sessions) {
+    await SessionManager.deleteSession(session.id);
   }
   process.exit(0);
 });
