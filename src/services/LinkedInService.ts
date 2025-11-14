@@ -118,7 +118,7 @@ class LinkedInService {
     
     try {
       const browser = await puppeteer.launch({
-        headless: true,
+        headless: false,
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
@@ -130,6 +130,12 @@ class LinkedInService {
           height: 768,
         },
       });
+
+      // Close the default blank page that Puppeteer creates
+      const pages = await browser.pages();
+      if (pages.length > 0) {
+        await pages[0].close();
+      }
 
       const page = await browser.newPage();
       
@@ -1745,6 +1751,20 @@ class LinkedInService {
       // Check connection status
       const connectionStatus = await page.evaluate(DOMFunctions.checkConnectionStatus);
       console.log(`  Connection status: ${connectionStatus.status}`);
+
+      // Check if we hit a login page/modal
+      if (connectionStatus.status === 'not_authenticated') {
+        console.error('  ❌ Session expired or login required!');
+        console.error('  💡 The browser is showing a login page instead of the profile.');
+        console.error('  💡 Please re-authenticate by calling the login endpoint.');
+        
+        // Mark session as not authenticated
+        SessionManager.updateSession(sessionId, {
+          isAuthenticated: false,
+        });
+        
+        throw new Error('Session expired. Please login again.');
+      }
 
       // If pending, wait for connection to be accepted
       if (connectionStatus.status === 'pending') {

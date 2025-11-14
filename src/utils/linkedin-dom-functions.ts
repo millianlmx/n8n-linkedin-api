@@ -482,6 +482,21 @@ export function clickConversationItem(index: number) {
 export function checkConnectionStatus() {
   console.log('--- Checking Connection Status ---');
 
+  // First, check if we're on a login page or modal
+  const passwordField = document.querySelector('input[type="password"]');
+  const loginForm = document.querySelector('form[data-id="sign-in-form"]');
+  const languageSelector = document.querySelector('button[aria-label*="العربية"]') || 
+                          document.querySelector('button[aria-label*="English"]');
+  
+  if (passwordField || loginForm || languageSelector) {
+    console.log('❌ ERROR: Detected login page or authentication modal!');
+    console.log('   Password field:', !!passwordField);
+    console.log('   Login form:', !!loginForm);
+    console.log('   Language selector:', !!languageSelector);
+    console.log('   Current URL:', window.location.href);
+    return { status: 'not_authenticated', connected: false };
+  }
+
   // Debug: Log all buttons with their aria-labels to understand what's available
   const allButtons = Array.from(document.querySelectorAll('button'));
   console.log(`Found ${allButtons.length} total buttons on page`);
