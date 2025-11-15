@@ -269,18 +269,100 @@ export class BrowserStateService {
         timeout: 15000,
       });
       
-      // Wait a bit for any redirects
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait a bit for any redirects and page to fully load
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
       const currentUrl = page.url();
+      console.log(`   📍 Current URL: ${currentUrl}`);
       
-      // Check if we're still on the feed page (not redirected to login)
-      const isValid = currentUrl.includes('/feed') && !currentUrl.includes('/login');
+      // Take a screenshot for debugging if in development mode
+      if (process.env.NODE_ENV !== 'production' && process.env.DEBUG_SCREENSHOTS === 'true') {
+        try {
+          await page.screenshot({ path: `/tmp/session-verify-${Date.now()}.png` });
+          console.log('   📸 Debug screenshot saved to /tmp/');
+        } catch (e) {
+          // Ignore screenshot errors
+        }
+      }
+      
+      // Check multiple indicators of a valid session
+      const urlCheck = currentUrl.includes('/feed') && !currentUrl.includes('/login');
+      console.log(`   🔗 URL check: ${urlCheck ? '✅' : '❌'} (contains /feed: ${currentUrl.includes('/feed')}, no /login: ${!currentUrl.includes('/login')})`);
+      
+      // Check for login page elements in the DOM
+      const pageCheck = await page.evaluate(() => {
+        // Check for login form (indicates we're on login page)
+        const hasLoginForm = !!document.querySelector('form[data-id="sign-in-form"]');
+        const hasPasswordField = !!document.querySelector('input[type="password"][name="session_password"]');
+        const hasEmailField = !!document.querySelector('input[name="session_key"]');
+        
+        // Check for feed elements (indicates we're on feed page)
+        const hasFeedElement = !!document.querySelector('.feed-shared-update-v2') || 
+                               !!document.querySelector('[data-id="feed-shared-update"]') ||
+                               !!document.querySelector('.scaffold-finite-scroll__content');
+        const hasGlobalNav = !!document.querySelector('.global-nav');
+        
+        // Additional checks for authenticated state
+        const hasSearchBar = !!document.querySelector('input[placeholder*="Search"]') ||
+                            !!document.querySelector('input[placeholder*="Rechercher"]');
+        const hasProfileNav = !!document.querySelector('[data-control-name="nav.settings_signout"]') ||
+                             !!document.querySelector('.global-nav__me-photo');
+        
+        // Get page title for debugging
+        const pageTitle = document.title;
+        
+        // Check for any error messages or challenge pages
+        // Only check for specific challenge elements, not generic text
+        const hasChallenge = !!document.querySelector('[data-test-id="challenge"]') ||
+                            !!document.querySelector('.challenge-page') ||
+                            !!document.querySelector('[data-id="verification-challenge"]');
+        
+        return {
+          hasLoginForm,
+          hasPasswordField,
+          hasEmailField,
+          hasFeedElement,
+          hasGlobalNav,
+          hasSearchBar,
+          hasProfileNav,
+          hasChallenge,
+          pageTitle,
+          isOnLoginPage: hasLoginForm || (hasPasswordField && hasEmailField),
+          isOnFeedPage: hasFeedElement || hasGlobalNav || hasSearchBar || hasProfileNav,
+        };
+      });
+      
+      console.log(`   📄 Page title: "${pageCheck.pageTitle}"`);
+      console.log(`   🔍 DOM check:`, {
+        loginForm: pageCheck.hasLoginForm ? '❌' : '✅',
+        passwordField: pageCheck.hasPasswordField ? '❌' : '✅',
+        feedElement: pageCheck.hasFeedElement ? '✅' : '❌',
+        globalNav: pageCheck.hasGlobalNav ? '✅' : '❌',
+        searchBar: pageCheck.hasSearchBar ? '✅' : '❌',
+        profileNav: pageCheck.hasProfileNav ? '✅' : '❌',
+        challenge: pageCheck.hasChallenge ? '⚠️' : '✅',
+      });
+      
+      // Check for challenge page
+      if (pageCheck.hasChallenge) {
+        console.log('   ⚠️  Challenge/verification page detected');
+        console.log('   💡 LinkedIn is asking for additional verification');
+        return false;
+      }
+      
+      // Session is valid if:
+      // 1. URL contains /feed AND
+      // 2. We're not on a login page AND
+      // 3. We can see feed elements OR global nav OR search bar OR profile nav
+      const isValid = urlCheck && 
+                     !pageCheck.isOnLoginPage && 
+                     pageCheck.isOnFeedPage;
       
       if (isValid) {
         console.log('   ✅ Session is valid');
       } else {
         console.log('   ❌ Session expired or invalid');
+        console.log(`   💡 Reason: URL=${urlCheck}, NotLogin=${!pageCheck.isOnLoginPage}, HasFeed=${pageCheck.isOnFeedPage}`);
       }
       
       return isValid;

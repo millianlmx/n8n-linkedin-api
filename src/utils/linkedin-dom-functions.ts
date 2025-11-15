@@ -493,8 +493,6 @@ export function checkConnectionStatus() {
       label: btn.getAttribute('aria-label'),
       text: btn.textContent?.trim().substring(0, 50) // First 50 chars
     }));
-  
-  console.log('Buttons with aria-label:', JSON.stringify(buttonsWithAriaLabel, null, 2));
 
   // Check if we're on a login/auth page by detecting multiple language selector buttons
   const languageButtons = buttonsWithAriaLabel.filter(btn => 
