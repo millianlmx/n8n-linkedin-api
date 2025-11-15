@@ -8,9 +8,12 @@ import messageRoutes from './routes/message.routes';
 import searchRoutes from './routes/search.routes';
 import SessionManager from './services/SessionManager';
 import LinkedInService from './services/LinkedInService';
+import { createServiceLogger } from './utils/logger';
 
 // Load environment variables
 dotenv.config();
+
+const log = createServiceLogger('Server');
 
 // Global session ID for auto-initialized session
 let globalSessionId: string | null = null;
@@ -25,7 +28,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  log.info(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
 
@@ -111,7 +114,7 @@ app.use((req: Request, res: Response) => {
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error('Error:', err);
+  log.error('Error:', err);
   res.status(500).json({
     success: false,
     message: err.message || 'Internal server error',
@@ -125,7 +128,7 @@ setInterval(() => {
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, closing server...');
+  log.info('SIGTERM received, closing server...');
   const sessions = SessionManager.getAllSessions();
   for (const session of sessions) {
     await SessionManager.deleteSession(session.id);
@@ -134,7 +137,7 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('SIGINT', async () => {
-  console.log('SIGINT received, closing server...');
+  log.info('SIGINT received, closing server...');
   const sessions = SessionManager.getAllSessions();
   for (const session of sessions) {
     await SessionManager.deleteSession(session.id);
@@ -145,10 +148,10 @@ process.on('SIGINT', async () => {
 // Auto-initialize browser and login on startup
 async function autoInitialize() {
   try {
-    console.log('\n🚀 Auto-initializing LinkedIn session...\n');
+    log.info('\n🚀 Auto-initializing LinkedIn session...\n');
     
     // Initialize browser
-    console.log('📥 Initializing browser...');
+    log.info('📥 Initializing browser...');
     const result = await LinkedInService.initializeBrowser(process.env.LINKEDIN_EMAIL);
     const { browser, page, sessionRestored, isAuthenticated } = result as { 
       browser: any; 
@@ -157,11 +160,11 @@ async function autoInitialize() {
       isAuthenticated?: boolean;
     };
     globalSessionId = SessionManager.createSession(browser, page);
-    console.log(`✅ Browser initialized with session ID: ${globalSessionId}`);
+    log.info(`✅ Browser initialized with session ID: ${globalSessionId}`);
     
     // If session was restored and is valid, skip login
     if (sessionRestored && isAuthenticated) {
-      console.log('✅ Using restored session - skipping login');
+      log.info('✅ Using restored session - skipping login');
       
       // Mark session as authenticated
       SessionManager.updateSession(globalSessionId, { isAuthenticated: true });
@@ -169,11 +172,11 @@ async function autoInitialize() {
       // Start message monitoring automatically
       try {
         await LinkedInService.startMessageMonitoring(globalSessionId);
-        console.log('✅ Message monitoring started automatically');
-        console.log('\n🎉 System ready! All features active.\n');
+        log.info('✅ Message monitoring started automatically');
+        log.info('\n🎉 System ready! All features active.\n');
       } catch (monitorError: any) {
-        console.warn('⚠️  Could not start message monitoring:', monitorError.message);
-        console.warn('   You can start it manually using POST /api/messages/monitor/start\n');
+        log.warn('⚠️  Could not start message monitoring:', monitorError.message);
+        log.warn('   You can start it manually using POST /api/messages/monitor/start\n');
       }
       return;
     }
@@ -183,38 +186,38 @@ async function autoInitialize() {
     const password = process.env.LINKEDIN_PASSWORD;
     
     if (!email || !password) {
-      console.warn('⚠️  LinkedIn credentials not found in .env file');
-      console.warn('   Please set LINKEDIN_EMAIL and LINKEDIN_PASSWORD');
-      console.warn('   You can login manually using POST /api/auth/login\n');
+      log.warn('⚠️  LinkedIn credentials not found in .env file');
+      log.warn('   Please set LINKEDIN_EMAIL and LINKEDIN_PASSWORD');
+      log.warn('   You can login manually using POST /api/auth/login\n');
       return;
     }
     
     // Auto-login
-    console.log('🔐 Attempting auto-login...');
+    log.info('🔐 Attempting auto-login...');
     try {
       await LinkedInService.login(globalSessionId, { email, password });
-      console.log('✅ Auto-login successful!');
-      console.log('✅ Message monitoring started automatically');
-      console.log('\n🎉 System ready! All features active.\n');
+      log.info('✅ Auto-login successful!');
+      log.info('✅ Message monitoring started automatically');
+      log.info('\n🎉 System ready! All features active.\n');
     } catch (loginError: any) {
       if (loginError.message.includes('security challenge')) {
-        console.warn('⚠️  LinkedIn security challenge detected');
-        console.warn('   Please complete the challenge in the browser');
-        console.warn('   Then use POST /api/auth/force-authenticate\n');
+        log.warn('⚠️  LinkedIn security challenge detected');
+        log.warn('   Please complete the challenge in the browser');
+        log.warn('   Then use POST /api/auth/force-authenticate\n');
       } else {
-        console.error('❌ Auto-login failed:', loginError.message);
-        console.warn('   You can login manually using POST /api/auth/login\n');
+        log.error('❌ Auto-login failed:', loginError.message);
+        log.warn('   You can login manually using POST /api/auth/login\n');
       }
     }
   } catch (error: any) {
-    console.error('❌ Auto-initialization failed:', error.message);
-    console.warn('   You can initialize manually using POST /api/auth/init\n');
+    log.error('❌ Auto-initialization failed:', error.message);
+    log.warn('   You can initialize manually using POST /api/auth/init\n');
   }
 }
 
 // Start server
 app.listen(PORT, async () => {
-  console.log(`
+  log.info(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
 ║        LinkedIn Scraper API Server                        ║
@@ -224,8 +227,8 @@ app.listen(PORT, async () => {
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
   `);
-  console.log('API Documentation available at: http://localhost:' + PORT);
-  console.log('\nReady to accept requests!\n');
+  log.info('API Documentation available at: http://localhost:' + PORT);
+  log.info('\nReady to accept requests!\n');
   
   // Auto-initialize after server starts
   await autoInitialize();

@@ -1,6 +1,9 @@
 import { LinkedInSession, SessionSummary } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { Browser, Page } from 'puppeteer';
+import { createServiceLogger } from '../utils/logger';
+
+const log = createServiceLogger('SessionManager');
 
 class SessionManager {
   private sessions: Map<string, LinkedInSession> = new Map();
@@ -53,7 +56,7 @@ class SessionManager {
         
         await session.browser.close();
       } catch (error) {
-        console.error('Error closing browser:', error);
+        log.error('Error closing browser:', error);
       }
       this.sessions.delete(sessionId);
     }

@@ -1,6 +1,8 @@
 import { Page } from 'puppeteer-core';
 import { Pool } from 'pg';
-import { logger } from '../utils/logger';
+import { createServiceLogger } from '../utils/logger';
+
+const log = createServiceLogger('BrowserState');
 
 /**
  * Browser State Service
@@ -48,9 +50,9 @@ export class BrowserStateService {
       `);
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_identifier ON browser_state(user_identifier)');
       
-      logger.info('✅ Browser state database initialized successfully');
+      log.info('Browser state database initialized');
     } catch (error) {
-      logger.error('❌ Browser state database initialization error:', error);
+      log.error('Failed to initialize browser state database', error);
       throw error;
     } finally {
       client.release();
@@ -67,11 +69,10 @@ export class BrowserStateService {
     
     const client = await this.pool.connect();
     try {
-      console.log(`💾 Saving browser state for: ${userIdentifier}`);
+      log.debug('Saving browser state', { userIdentifier });
       
       // Get all cookies from the browser
       const cookies = await page.cookies();
-      console.log(`   📦 Saved ${cookies.length} cookies`);
       
       // Get localStorage and sessionStorage
       const storageData = await page.evaluate(() => {
@@ -92,8 +93,11 @@ export class BrowserStateService {
         };
       });
       
-      console.log(`   📦 Saved ${Object.keys(storageData.localStorage).length} localStorage items`);
-      console.log(`   📦 Saved ${Object.keys(storageData.sessionStorage).length} sessionStorage items`);
+      log.debug('Browser state collected', { 
+        cookieCount: cookies.length,
+        localStorageItems: Object.keys(storageData.localStorage).length,
+        sessionStorageItems: Object.keys(storageData.sessionStorage).length
+      });
       
       // Get user agent
       const userAgent = await page.evaluate(() => navigator.userAgent);
@@ -117,9 +121,9 @@ export class BrowserStateService {
         ]
       );
       
-      logger.info(`✅ Browser state saved for: ${userIdentifier}`);
+      log.info('Browser state saved', { userIdentifier });
     } catch (error) {
-      logger.error('❌ Failed to save browser state:', error);
+      log.error('Failed to save browser state', error, { userIdentifier });
       throw error;
     } finally {
       client.release();
@@ -137,7 +141,7 @@ export class BrowserStateService {
     
     const client = await this.pool.connect();
     try {
-      console.log(`🔄 Restoring browser state for: ${userIdentifier}`);
+      log.debug('Restoring browser state', { userIdentifier });
       
       // Retrieve from database
       const result = await client.query(
@@ -146,7 +150,7 @@ export class BrowserStateService {
       );
       
       if (result.rows.length === 0) {
-        console.log(`   ℹ️  No saved browser state found for: ${userIdentifier}`);
+        log.debug('No saved browser state found', { userIdentifier });
         return false;
       }
       
@@ -155,13 +159,11 @@ export class BrowserStateService {
       // Set user agent if available
       if (user_agent) {
         await page.setUserAgent(user_agent);
-        console.log(`   ✅ Restored user agent`);
       }
       
       // Restore cookies
       if (cookies && Array.isArray(cookies)) {
         await page.setCookie(...cookies);
-        console.log(`   ✅ Restored ${cookies.length} cookies`);
       }
       
       // Navigate to LinkedIn first to set the correct domain for storage
@@ -195,12 +197,15 @@ export class BrowserStateService {
         }
       }, { localStorage: local_storage || {}, sessionStorage: session_storage || {} });
       
-      console.log(`   ✅ Restored localStorage and sessionStorage`);
-      
-      logger.info(`✅ Browser state restored for: ${userIdentifier}`);
+      log.info('Browser state restored', { 
+        userIdentifier,
+        cookieCount: cookies?.length || 0,
+        localStorageItems: Object.keys(local_storage || {}).length,
+        sessionStorageItems: Object.keys(session_storage || {}).length
+      });
       return true;
     } catch (error) {
-      logger.error('❌ Failed to restore browser state:', error);
+      log.error('Failed to restore browser state', error, { userIdentifier });
       return false;
     } finally {
       client.release();
@@ -224,7 +229,7 @@ export class BrowserStateService {
       
       return result.rows.length > 0;
     } catch (error) {
-      logger.error('❌ Failed to check browser state:', error);
+      log.error('Failed to check browser state', error);
       return false;
     } finally {
       client.release();
@@ -245,9 +250,9 @@ export class BrowserStateService {
         [userIdentifier]
       );
       
-      logger.info(`✅ Browser state deleted for: ${userIdentifier}`);
+      log.info('Browser state deleted', { userIdentifier });
     } catch (error) {
-      logger.error('❌ Failed to delete browser state:', error);
+      log.error('Failed to delete browser state', error, { userIdentifier });
       throw error;
     } finally {
       client.release();
@@ -261,7 +266,7 @@ export class BrowserStateService {
    */
   async verifySession(page: Page): Promise<boolean> {
     try {
-      console.log('🔍 Verifying session validity...');
+      log.debug('Verifying session validity');
       
       // Navigate to LinkedIn feed (requires authentication)
       await page.goto('https://www.linkedin.com/feed/', {
@@ -273,13 +278,13 @@ export class BrowserStateService {
       await new Promise(resolve => setTimeout(resolve, 3000));
       
       const currentUrl = page.url();
-      console.log(`   📍 Current URL: ${currentUrl}`);
       
       // Take a screenshot for debugging if in development mode
       if (process.env.NODE_ENV !== 'production' && process.env.DEBUG_SCREENSHOTS === 'true') {
         try {
-          await page.screenshot({ path: `/tmp/session-verify-${Date.now()}.png` });
-          console.log('   📸 Debug screenshot saved to /tmp/');
+          const screenshotPath = `/tmp/session-verify-${Date.now()}.png` as const;
+          await page.screenshot({ path: screenshotPath as any });
+          log.debug('Debug screenshot saved', { path: screenshotPath });
         } catch (e) {
           // Ignore screenshot errors
         }
@@ -287,7 +292,6 @@ export class BrowserStateService {
       
       // Check multiple indicators of a valid session
       const urlCheck = currentUrl.includes('/feed') && !currentUrl.includes('/login');
-      console.log(`   🔗 URL check: ${urlCheck ? '✅' : '❌'} (contains /feed: ${currentUrl.includes('/feed')}, no /login: ${!currentUrl.includes('/login')})`);
       
       // Check for login page elements in the DOM
       const pageCheck = await page.evaluate(() => {
@@ -332,21 +336,9 @@ export class BrowserStateService {
         };
       });
       
-      console.log(`   📄 Page title: "${pageCheck.pageTitle}"`);
-      console.log(`   🔍 DOM check:`, {
-        loginForm: pageCheck.hasLoginForm ? '❌' : '✅',
-        passwordField: pageCheck.hasPasswordField ? '❌' : '✅',
-        feedElement: pageCheck.hasFeedElement ? '✅' : '❌',
-        globalNav: pageCheck.hasGlobalNav ? '✅' : '❌',
-        searchBar: pageCheck.hasSearchBar ? '✅' : '❌',
-        profileNav: pageCheck.hasProfileNav ? '✅' : '❌',
-        challenge: pageCheck.hasChallenge ? '⚠️' : '✅',
-      });
-      
       // Check for challenge page
       if (pageCheck.hasChallenge) {
-        console.log('   ⚠️  Challenge/verification page detected');
-        console.log('   💡 LinkedIn is asking for additional verification');
+        log.warn('Challenge/verification page detected', { currentUrl, pageTitle: pageCheck.pageTitle });
         return false;
       }
       
@@ -359,15 +351,20 @@ export class BrowserStateService {
                      pageCheck.isOnFeedPage;
       
       if (isValid) {
-        console.log('   ✅ Session is valid');
+        log.info('Session verified as valid', { currentUrl });
       } else {
-        console.log('   ❌ Session expired or invalid');
-        console.log(`   💡 Reason: URL=${urlCheck}, NotLogin=${!pageCheck.isOnLoginPage}, HasFeed=${pageCheck.isOnFeedPage}`);
+        log.warn('Session expired or invalid', { 
+          currentUrl,
+          urlCheck,
+          isOnLoginPage: pageCheck.isOnLoginPage,
+          hasFeedelements: pageCheck.isOnFeedPage,
+          pageTitle: pageCheck.pageTitle
+        });
       }
       
       return isValid;
     } catch (error) {
-      logger.error('❌ Failed to verify session:', error);
+      log.error('Failed to verify session', error);
       return false;
     }
   }
