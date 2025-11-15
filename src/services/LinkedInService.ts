@@ -1325,6 +1325,49 @@ class LinkedInService {
 
       log.info('Message sent successfully', { conversationUrl: request.conversationUrl });
 
+      // Update cache with the new message if profileUrl is provided
+      if (request.profileUrl) {
+        try {
+          log.debug('Updating cache with sent message', { profileUrl: request.profileUrl });
+          
+          // Get existing cached messages
+          const cachedMessages = await this.cacheService.getConversation(request.profileUrl) || [];
+          
+          // Create the new message object
+          const now = new Date();
+          const months = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 
+                          'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+          const day = now.getDate();
+          const month = months[now.getMonth()];
+          const hours = now.getHours().toString().padStart(2, '0');
+          const minutes = now.getMinutes().toString().padStart(2, '0');
+          const timestamp = `${day} ${month} ${hours}:${minutes}`;
+          
+          const newMessage = {
+            sender: 'You', // Sent by the current user
+            message: request.message,
+            timestamp
+          };
+          
+          // Append the new message to the cache
+          const updatedMessages = [...cachedMessages, newMessage];
+          await this.cacheService.cacheConversation(request.profileUrl, updatedMessages);
+          
+          log.info('Cache updated with sent message', { 
+            profileUrl: request.profileUrl, 
+            messageCount: updatedMessages.length 
+          });
+        } catch (cacheError: any) {
+          // Don't fail the whole operation if cache update fails
+          log.warn('Failed to update cache after sending message', { 
+            error: cacheError.message,
+            profileUrl: request.profileUrl 
+          });
+        }
+      } else {
+        log.debug('No profileUrl provided, skipping cache update');
+      }
+
       // Switch back to monitoring page
       await this.switchToMonitoringPage(sessionId);
 

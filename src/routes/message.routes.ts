@@ -157,11 +157,11 @@ router.get('/conversation', async (req: Request, res: Response) => {
 /**
  * POST /api/messages/send
  * Send a message to a conversation
- * Body: { sessionId: string, conversationUrl: string, message: string }
+ * Body: { sessionId: string, conversationUrl: string, message: string, profileUrl?: string }
  */
 router.post('/send', async (req: Request, res: Response) => {
   try {
-    const { sessionId, conversationUrl, message } = req.body;
+    const { sessionId, conversationUrl, message, profileUrl } = req.body;
 
     if (!sessionId || !conversationUrl || !message) {
       return res.status(400).json({
@@ -182,6 +182,7 @@ router.post('/send', async (req: Request, res: Response) => {
     const result = await LinkedInService.sendMessage(sessionId, {
       conversationUrl,
       message,
+      profileUrl: profileUrl && typeof profileUrl === 'string' ? profileUrl : undefined,
     });
 
     res.json(result);

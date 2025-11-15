@@ -43,6 +43,7 @@ export interface ConnectRequest {
 export interface SendMessageRequest {
   conversationUrl: string;
   message: string;
+  profileUrl?: string; // Optional profile URL for cache update
 }
 
 export interface MessageResponse {

@@ -163,6 +163,19 @@ export class Messaging implements INodeType {
 				description: 'The message content to send',
 				placeholder: 'Type your message here...',
 			},
+			{
+				displayName: 'Profile URL (for cache update)',
+				name: 'profileUrlForSend',
+				type: 'string',
+				default: '',
+				displayOptions: {
+					show: {
+						operation: ['sendMessage'],
+					},
+				},
+				description: 'LinkedIn profile URL to update cache with sent message (optional but recommended for message monitoring)',
+				placeholder: 'https://www.linkedin.com/in/username/',
+			},
 		],
 	};
 
@@ -240,6 +253,18 @@ export class Messaging implements INodeType {
 				} else if (operation === 'sendMessage') {
 					const conversationUrl = this.getNodeParameter('conversationUrl', i) as string;
 					const message = this.getNodeParameter('message', i) as string;
+					const profileUrlForSend = this.getNodeParameter('profileUrlForSend', i, '') as string;
+
+					const requestBody: any = {
+						sessionId,
+						conversationUrl,
+						message,
+					};
+
+					// Add profileUrl if provided for cache update
+					if (profileUrlForSend) {
+						requestBody.profileUrl = profileUrlForSend;
+					}
 
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
@@ -247,11 +272,7 @@ export class Messaging implements INodeType {
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						body: {
-							sessionId,
-							conversationUrl,
-							message,
-						},
+						body: requestBody,
 						json: true,
 					});
 
