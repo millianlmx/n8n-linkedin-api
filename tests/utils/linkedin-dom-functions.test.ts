@@ -583,4 +583,58 @@ describe('LinkedIn DOM Functions', () => {
       expect(result).toBe(false);
     });
   });
+
+  describe('extractProfileName', () => {
+    it('should extract name from standard UI', () => {
+      document.body.innerHTML = `
+        <h1 class="inline t-24 v-align-middle break-words">John Doe</h1>
+      `;
+
+      const result = DOMFunctions.extractProfileName();
+
+      expect(result).toBe('John Doe');
+    });
+
+    it('should extract name from premium UI', () => {
+      document.body.innerHTML = `
+        <div class="ph5 pb5">
+          <h1 class="t-24 v-align-middle break-words">Victor Poulain</h1>
+        </div>
+      `;
+
+      const result = DOMFunctions.extractProfileName();
+
+      expect(result).toBe('Victor Poulain');
+    });
+
+    it('should extract name using fallback selector', () => {
+      document.body.innerHTML = `
+        <h1 class="t-24 v-align-middle break-words">Jane Smith</h1>
+      `;
+
+      const result = DOMFunctions.extractProfileName();
+
+      expect(result).toBe('Jane Smith');
+    });
+
+    it('should extract name from profile-content container', () => {
+      document.body.innerHTML = `
+        <div id="profile-content">
+          <h1>Bob Johnson</h1>
+        </div>
+      `;
+
+      const result = DOMFunctions.extractProfileName();
+
+      expect(result).toBe('Bob Johnson');
+    });
+
+    it('should return empty string when name not found', () => {
+      document.body.innerHTML = '<div></div>';
+
+      const result = DOMFunctions.extractProfileName();
+
+      expect(result).toBe('');
+    });
+  });
 });

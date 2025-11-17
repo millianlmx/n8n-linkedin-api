@@ -575,8 +575,44 @@ export function checkConnectionStatus() {
 }
 
 export function extractProfileName() {
-  const nameEl = document.querySelector('h1.inline.t-24.v-align-middle.break-words');
-  return nameEl?.textContent?.trim() || '';
+  console.log('--- Extracting Profile Name ---');
+  
+  // Try multiple selectors to support different UI types
+  
+  // Standard UI: h1 with inline class
+  let nameEl = document.querySelector('h1.inline.t-24.v-align-middle.break-words');
+  if (nameEl) {
+    console.log('✅ Found name using standard UI selector');
+  }
+  
+  // Premium UI: h1 within the ph5.pb5 container
+  if (!nameEl) {
+    nameEl = document.querySelector('.ph5.pb5 h1.t-24.v-align-middle.break-words');
+    if (nameEl) {
+      console.log('✅ Found name using premium UI selector (.ph5.pb5)');
+    }
+  }
+  
+  // Fallback: Any h1 with the specific classes (works for both standard and premium)
+  if (!nameEl) {
+    nameEl = document.querySelector('h1.t-24.v-align-middle.break-words');
+    if (nameEl) {
+      console.log('✅ Found name using fallback selector (h1.t-24)');
+    }
+  }
+  
+  // Additional fallback: Look for h1 within profile content
+  if (!nameEl) {
+    nameEl = document.querySelector('#profile-content h1');
+    if (nameEl) {
+      console.log('✅ Found name using profile-content selector');
+    }
+  }
+  
+  const name = nameEl?.textContent?.trim() || '';
+  console.log('Extracted name:', name || '(empty)');
+  
+  return name;
 }
 
 export function findAndClickConversationByName(firstName: string, lastName: string) {
