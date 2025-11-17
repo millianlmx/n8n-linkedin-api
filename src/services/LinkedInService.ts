@@ -176,6 +176,23 @@ class LinkedInService {
             } else {
               log.warn('Saved session expired', { userIdentifier });
               await BrowserStateService.deleteBrowserState(userIdentifier);
+              
+              // Clear all cookies and storage to ensure a clean state
+              log.debug('Clearing cookies and storage');
+              const client = await page.target().createCDPSession();
+              await client.send('Network.clearBrowserCookies');
+              await client.send('Network.clearBrowserCache');
+              
+              // Clear localStorage and sessionStorage
+              await page.evaluate(() => {
+                localStorage.clear();
+                sessionStorage.clear();
+              });
+              
+              // Navigate to a blank page to reset the page state
+              // This ensures the page is in a clean state for subsequent login attempts
+              await page.goto('about:blank', { waitUntil: 'domcontentloaded' });
+              log.debug('Page reset to blank state after expired session');
             }
           }
         }
