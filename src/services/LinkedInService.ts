@@ -1180,11 +1180,19 @@ class LinkedInService {
 
       log.info('Reading conversation', { conversationUrl });
       
-      // Navigate to the conversation (conversationUrl is always a full URL)
-      await page.goto(conversationUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 30000,
-      });
+      // Navigate to the conversation with domcontentloaded (faster than networkidle2)
+      try {
+        await page.goto(conversationUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 10000,
+        });
+      } catch (navError: any) {
+        // If navigation times out but page is loaded, continue
+        log.warn('Navigation timeout, checking if page loaded', { error: navError.message });
+      }
+
+      // Wait 4 seconds for page to fully load (good fiber connection)
+      await this.wait(4000);
 
       // Wait for messages
       await page.waitForSelector('.msg-s-message-list', { timeout: 10000 });
@@ -1254,11 +1262,16 @@ class LinkedInService {
       
       // Navigate to the conversation with domcontentloaded (faster than networkidle2)
       const fullUrl = request.conversationUrl;
-        
-      await page.goto(fullUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 10000,
-      });
+      
+      try {
+        await page.goto(fullUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 10000,
+        });
+      } catch (navError: any) {
+        // If navigation times out but page is loaded, continue
+        log.warn('Navigation timeout, checking if page loaded', { error: navError.message });
+      }
 
       // Wait 4 seconds for page to fully load (good fiber connection)
       await this.wait(4000);
