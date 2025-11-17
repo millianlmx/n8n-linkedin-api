@@ -1901,7 +1901,19 @@ class LinkedInService {
         log.debug('Profile content timeout, continuing');
       });
 
-      await this.wait(1000);
+      // Wait for action buttons to be present (Message, Connect, or Pending buttons)
+      await Promise.race([
+        page.waitForSelector('button[aria-label*="message"]', { timeout: 4000 }),
+        page.waitForSelector('button[aria-label*="Message"]', { timeout: 4000 }),
+        page.waitForSelector('button[aria-label*="attente"]', { timeout: 4000 }),
+        page.waitForSelector('button[aria-label*="Invitez"]', { timeout: 4000 }),
+        page.waitForSelector('.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti button', { timeout: 4000 }),
+      ]).catch(() => {
+        log.debug('Action buttons timeout, continuing');
+      });
+
+      // Additional wait for page to stabilize
+      await this.wait(2000);
 
       // Check connection status
       const connectionStatus = await page.evaluate(DOMFunctions.checkConnectionStatus);
