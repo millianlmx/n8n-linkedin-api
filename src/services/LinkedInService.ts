@@ -712,7 +712,7 @@ class LinkedInService {
           await this.wait(2000);
 
           // Re-setup the observer after reload
-          await monitoringPage.evaluate(() => {
+          const observerReestablished = await monitoringPage.evaluate(() => {
             let conversationList = document.querySelector('#main > div > div.scaffold-layout__list-detail-inner.scaffold-layout__list-detail-inner--grow > div.scaffold-layout__list.msg__list > div.relative.display-flex.justify-center.flex-column.overflow-hidden.msg-conversations-container--inbox-shortcuts > ul');
             
             if (!conversationList) {
@@ -722,22 +722,18 @@ class LinkedInService {
             }
             
             if (conversationList && !(window as any).messageObserver) {
-              log.debug('Re-establishing observer after reload', { className: conversationList.className });
+              // Note: Cannot use log.debug here as we're in browser context
               
               const observer = new MutationObserver((mutations) => {
-                log.debug('MutationObserver triggered', { mutationCount: mutations.length });
                 let hasUnreadChanges = false;
                 
                 for (const mutation of mutations) {
-                  log.debug('Mutation detected', { type: mutation.type });
-                  
                   if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
                       if (node.nodeType === Node.ELEMENT_NODE) {
                         const element = node as HTMLElement;
                         if (element.querySelector?.('.msg-conversation-card__unread-count') ||
                             element.classList?.contains('msg-conversation-listitem')) {
-                          log.debug('Found unread badge or new conversation item');
                           hasUnreadChanges = true;
                         }
                       }
@@ -746,7 +742,6 @@ class LinkedInService {
                     const target = mutation.target as HTMLElement;
                     if (target.classList?.contains('msg-conversation-card__unread-count') ||
                         target.querySelector?.('.msg-conversation-card__unread-count')) {
-                      log.debug('Unread badge attribute changed');
                       hasUnreadChanges = true;
                     }
                   }
@@ -755,7 +750,6 @@ class LinkedInService {
                 }
 
                 if (hasUnreadChanges) {
-                  log.debug('New message detected by observer');
                   window.dispatchEvent(new CustomEvent('linkedin-new-message'));
                 }
               });
@@ -767,14 +761,18 @@ class LinkedInService {
                 characterData: true
               });
 
-              log.debug('Observer re-established successfully');
               (window as any).messageObserver = observer;
-            } else if (!conversationList) {
-              log.error('Could not find conversation list element after reload');
+              return true; // Successfully re-established
             }
+            return false; // Could not find conversation list
           });
 
-          log.debug('Observer refreshed');
+          if (observerReestablished) {
+            log.debug('Observer re-established successfully');
+          } else {
+            log.warn('Could not find conversation list element after reload');
+          }
+          log.debug('Observer refresh completed');
         } catch (error: any) {
           log.error('Monitoring refresh error', error);
         }
@@ -1931,10 +1929,28 @@ class LinkedInService {
         throw new Error('Session expired. Please login again.');
       }
 
-      // If pending, wait for connection to be accepted
+      // If pending, check if Message button is available (Premium users can message pending connections)
       if (connectionStatus.status === 'pending') {
-        log.info('Connection request is pending', { profileUrl });
-        throw new Error('Connection request was not accepted');
+        log.info('Connection request is pending - checking if messaging is available', { profileUrl });
+        
+        // Check if Message button exists (Premium feature)
+        const hasMessageButton = await page.evaluate(() => {
+          const messageButton = Array.from(document.querySelectorAll('button')).find(btn => {
+            const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || '';
+            const text = btn.textContent?.toLowerCase() || '';
+            return ariaLabel.includes('message') || ariaLabel.includes('envoyer un message') || 
+                   text.includes('message');
+          });
+          return !!messageButton;
+        });
+        
+        if (!hasMessageButton) {
+          log.warn('Connection pending and no message button found', { profileUrl });
+          throw new Error('Connection request is pending. Wait for acceptance or upgrade to Premium to message.');
+        }
+        
+        log.info('Message button available despite pending connection (Premium)', { profileUrl });
+        // Continue to get conversation URL
       } else if (!connectionStatus.connected) {
         throw new Error('User is not connected. Please send a connection request first.');
       }
