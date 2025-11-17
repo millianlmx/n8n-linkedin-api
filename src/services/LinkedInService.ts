@@ -1503,7 +1503,7 @@ class LinkedInService {
 
       // Wait for profile to load - use Promise.race for faster fallback
       await Promise.race([
-        page.waitForSelector('.ph5.pb5', { timeout: 4000 }),
+        page.waitForSelector('.ph5', { timeout: 4000 }),
         page.waitForSelector('main', { timeout: 4000 }),
         page.waitForSelector('h1', { timeout: 4000 }),
         page.waitForSelector('button[aria-label*="Invitez"]', { timeout: 4000 }), // Connect button
@@ -1527,9 +1527,10 @@ class LinkedInService {
 
       // Detect which UI flow to use and check if connection button exists
       const connectionCheck = await page.evaluate(() => {
-        const profileHeader = document.querySelector(
-          '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
-        );
+        // Try multiple selectors for profile header (LinkedIn changes classes frequently)
+        const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
+                             document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+                             document.querySelector('div.ph5');
 
         if (!profileHeader) {
           return { uiType: 'unknown', hasConnectButton: false };
@@ -1549,7 +1550,7 @@ class LinkedInService {
 
         // Check for "More" dropdown button
         const moreButton = profileHeader.querySelector(
-          'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button'
+          'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > button'
         ) as HTMLButtonElement;
         
         if (moreButton) {
@@ -1585,9 +1586,9 @@ class LinkedInService {
         log.debug('Using direct connect button flow');
         
         buttonClicked = await page.evaluate(() => {
-          const profileHeader = document.querySelector(
-            '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
-          );
+          const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
+                               document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+                               document.querySelector('div.ph5');
           
           if (!profileHeader) return false;
           
@@ -1619,14 +1620,14 @@ class LinkedInService {
         
         // Click the "More" dropdown button
         const moreButtonClicked = await page.evaluate(() => {
-          const profileHeader = document.querySelector(
-            '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
-          );
+          const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
+                               document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+                               document.querySelector('div.ph5');
           
           if (!profileHeader) return false;
           
           const moreButton = profileHeader.querySelector(
-            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button'
+            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > button'
           ) as HTMLButtonElement;
           
           if (moreButton) {
@@ -1646,14 +1647,14 @@ class LinkedInService {
 
         // Click "Se connecter" in the dropdown menu
         buttonClicked = await page.evaluate(() => {
-          const profileHeader = document.querySelector(
-            '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
-          );
+          const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
+                               document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+                               document.querySelector('div.ph5');
           
           if (!profileHeader) return false;
           
           const dropdownMenu = profileHeader.querySelector(
-            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > div > div > ul'
+            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > div > div > ul'
           );
           
           if (!dropdownMenu) return false;
