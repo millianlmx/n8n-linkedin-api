@@ -536,19 +536,28 @@ export function checkConnectionStatus() {
   // Note: We don't check for Message button because Premium users can message anyone
   // This would give false positives for Premium accounts
 
-  // Check for pending connection
+  // Check for pending connection - look for clock icon and "En attente"/"Pending" text
   const pendingButton = allButtons.find(btn => {
     const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || '';
-    const text = btn.textContent?.toLowerCase() || '';
-    return ariaLabel.includes('pending') || 
-           ariaLabel.includes('en attente') ||
-           text.includes('pending') ||
-           text.includes('en attente');
+    const text = btn.textContent?.trim().toLowerCase() || '';
+    
+    // Check for "En attente" or "Pending" in aria-label or text
+    const hasPendingText = ariaLabel.includes('pending') || 
+                          ariaLabel.includes('en attente') ||
+                          ariaLabel.includes('attente') ||
+                          text === 'pending' ||
+                          text === 'en attente';
+    
+    // Check for clock icon (pending indicator)
+    const hasClockIcon = btn.querySelector('svg[data-test-icon="clock-small"]') !== null;
+    
+    return hasPendingText || hasClockIcon;
   });
   
   if (pendingButton) {
     console.log('⏳ Status determined: pending');
     console.log('   Button aria-label:', pendingButton.getAttribute('aria-label'));
+    console.log('   Button text:', pendingButton.textContent?.trim());
     return { status: 'pending', connected: false };
   }
 

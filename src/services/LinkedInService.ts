@@ -1894,7 +1894,7 @@ class LinkedInService {
 
       // Wait for profile to load
       await Promise.race([
-        page.waitForSelector('.ph5.pb5', { timeout: 4000 }),
+        page.waitForSelector('.ph5', { timeout: 4000 }),
         page.waitForSelector('main', { timeout: 4000 }),
         page.waitForSelector('h1', { timeout: 4000 }),
       ]).catch(() => {
