@@ -1252,13 +1252,16 @@ class LinkedInService {
 
       log.info('Sending message', { conversationUrl: request.conversationUrl });
       
-      // Navigate to the conversation
+      // Navigate to the conversation with domcontentloaded (faster than networkidle2)
       const fullUrl = request.conversationUrl;
         
       await page.goto(fullUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 30000,
+        waitUntil: 'domcontentloaded',
+        timeout: 10000,
       });
+
+      // Wait 4 seconds for page to fully load (good fiber connection)
+      await this.wait(4000);
 
       // Wait for message input
       await page.waitForSelector('.msg-form__contenteditable', { timeout: 10000 });
