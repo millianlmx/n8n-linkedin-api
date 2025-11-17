@@ -2,7 +2,7 @@ import winston from 'winston';
 
 // Custom format for console output
 const consoleFormat = winston.format.printf(({ level, message, timestamp, service, ...metadata }) => {
-  const meta = Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : '';
+  const meta = Object.keys(metadata).length ? JSON.stringify(metadata) : '';
   const serviceTag = service ? `[${service}]` : '';
   return `${timestamp} ${level.toUpperCase()} ${serviceTag} ${message} ${meta}`;
 });
