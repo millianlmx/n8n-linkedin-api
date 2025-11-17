@@ -1492,38 +1492,161 @@ class LinkedInService {
         return { success: false, message: 'Already connected' };
       }
 
-      // Detect which UI flow to use (Premium vs Regular)
-      const uiType = await page.evaluate(() => {
-        // Check for Plus dropdown button (premium profile)
-        const plusButton = document.querySelector(
-            "#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card.AGDDJEWUIGxvUeCWnjRyxxuoAIoropDXce > div.ph5.pb5 > div.dLQclXVMsTccpCHwnLzWAwBcxvhuzSNgedE > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button"
-        ) as HTMLButtonElement;
-        
-        if (plusButton) {
-          return 'premium';
+      // Detect which UI flow to use and check if connection button exists
+      const connectionCheck = await page.evaluate(() => {
+        const profileHeader = document.querySelector(
+          '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
+        );
+
+        if (!profileHeader) {
+          return { uiType: 'unknown', hasConnectButton: false };
         }
 
-        // Check for direct connect button (regular profile)
-        const directButton = document.querySelector('button[aria-label*="Invitez"]') ||
+        // Check for direct "Se connecter" button in the action bar
+        const directConnectButton = profileHeader.querySelector(
+          'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > button'
+        ) as HTMLButtonElement;
+        
+        if (directConnectButton) {
+          const buttonText = directConnectButton.textContent?.trim() || '';
+          if (buttonText.includes('Se connecter') || buttonText.includes('Connect')) {
+            return { uiType: 'direct', hasConnectButton: true };
+          }
+        }
+
+        // Check for "More" dropdown button
+        const moreButton = profileHeader.querySelector(
+          'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button'
+        ) as HTMLButtonElement;
+        
+        if (moreButton) {
+          return { uiType: 'dropdown', hasConnectButton: true };
+        }
+
+        // Fallback: try to find any connect button
+        const fallbackButton = document.querySelector('button[aria-label*="Invitez"]') ||
           Array.from(document.querySelectorAll('button.artdeco-button--primary')).find(btn => {
             const text = btn.textContent?.trim() || '';
             return text.includes('Se connecter') || text.includes('Connect');
           });
         
-        if (directButton) {
-          return 'regular';
+        if (fallbackButton) {
+          return { uiType: 'regular', hasConnectButton: true };
         }
         
-        return 'unknown';
+        return { uiType: 'none', hasConnectButton: false };
       });
 
-      log.debug('Detected UI type', { uiType });
+      log.debug('Connection check result', connectionCheck);
+
+      // If no connect button found, assume already sent or connected
+      if (!connectionCheck.hasConnectButton || connectionCheck.uiType === 'none') {
+        log.info('No connect button found - connection request likely already sent', { profileUrl });
+        return { success: false, message: 'Connection request already sent or not available' };
+      }
 
       let buttonClicked = false;
 
-      if (uiType === 'regular') {
-        // Regular flow: Direct "Se connecter" button
-        log.debug('Using regular profile flow');
+      if (connectionCheck.uiType === 'direct') {
+        // Direct "Se connecter" button flow
+        log.debug('Using direct connect button flow');
+        
+        buttonClicked = await page.evaluate(() => {
+          const profileHeader = document.querySelector(
+            '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
+          );
+          
+          if (!profileHeader) return false;
+          
+          const directConnectButton = profileHeader.querySelector(
+            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > button'
+          ) as HTMLButtonElement;
+          
+          if (directConnectButton) {
+            const buttonText = directConnectButton.textContent?.trim() || '';
+            if (buttonText.includes('Se connecter') || buttonText.includes('Connect')) {
+              directConnectButton.click();
+              return true;
+            }
+          }
+          
+          return false;
+        });
+
+        if (!buttonClicked) {
+          log.warn('Direct connect button not found or not clickable');
+          return { success: false, message: 'Connect button not found' };
+        }
+
+        log.debug('Clicked direct connect button');
+
+      } else if (connectionCheck.uiType === 'dropdown') {
+        // Dropdown flow: Click "More" button, then find "Se connecter" in dropdown
+        log.debug('Using dropdown flow');
+        
+        // Click the "More" dropdown button
+        const moreButtonClicked = await page.evaluate(() => {
+          const profileHeader = document.querySelector(
+            '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
+          );
+          
+          if (!profileHeader) return false;
+          
+          const moreButton = profileHeader.querySelector(
+            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button'
+          ) as HTMLButtonElement;
+          
+          if (moreButton) {
+            moreButton.click();
+            return true;
+          }
+          return false;
+        });
+
+        if (!moreButtonClicked) {
+          log.warn('More button not found');
+          return { success: false, message: 'More button not found' };
+        }
+
+        log.debug('Clicked More button, waiting for dropdown');
+        await this.wait(500);
+
+        // Click "Se connecter" in the dropdown menu
+        buttonClicked = await page.evaluate(() => {
+          const profileHeader = document.querySelector(
+            '#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card > div.ph5.pb5'
+          );
+          
+          if (!profileHeader) return false;
+          
+          const dropdownMenu = profileHeader.querySelector(
+            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > div > div > ul'
+          );
+          
+          if (!dropdownMenu) return false;
+          
+          const menuItems = dropdownMenu.querySelectorAll('li > div');
+          
+          for (const item of Array.from(menuItems)) {
+            const text = item.textContent?.trim() || '';
+            if (text.includes('Se connecter') || text.includes('Connect')) {
+              (item as HTMLElement).click();
+              return true;
+            }
+          }
+          return false;
+        });
+
+        if (!buttonClicked) {
+          log.warn('Connect option not found in dropdown');
+          return { success: false, message: 'Connect option not found in dropdown' };
+        }
+
+        log.debug('Clicked connect option from dropdown');
+
+      } else if (connectionCheck.uiType === 'regular') {
+        // Fallback regular flow: Try to find any connect button
+        log.debug('Using fallback regular profile flow');
         
         buttonClicked = await page.evaluate(() => {
           // Try aria-label selector first
@@ -1549,63 +1672,14 @@ class LinkedInService {
         });
 
         if (!buttonClicked) {
-          log.warn('Connect button not found');
+          log.warn('Connect button not found in fallback flow');
           return { success: false, message: 'Connect button not found' };
         }
 
-        log.debug('Clicked direct connect button');
-
-      } else if (uiType === 'premium') {
-        // Premium flow: Plus button -> dropdown -> "Se connecter"
-        log.debug('Using Premium profile flow');
-        
-        // Click the "Plus" dropdown button
-        const plusButtonClicked = await page.evaluate(() => {
-          const plusButton = document.querySelector(
-            "#profile-content > div > div.scaffold-layout.scaffold-layout--breakpoint-xl.scaffold-layout--main-aside.scaffold-layout--reflow.pv-profile.pvs-loader-wrapper__shimmer--animate > div > div > main > section.artdeco-card.AGDDJEWUIGxvUeCWnjRyxxuoAIoropDXce > div.ph5.pb5 > div.dLQclXVMsTccpCHwnLzWAwBcxvhuzSNgedE > div > div.artdeco-dropdown.artdeco-dropdown--placement-bottom.artdeco-dropdown--justification-left.ember-view > button"
-          ) as HTMLButtonElement;
-          
-          if (plusButton) {
-            plusButton.click();
-            return true;
-          }
-          return false;
-        });
-
-        if (!plusButtonClicked) {
-          log.warn('Plus button not found');
-          return { success: false, message: 'Plus button not found' };
-        }
-
-        log.debug('Clicked Plus button, waiting for dropdown');
-        await this.wait(500);
-
-        // Click "Se connecter" in the dropdown menu
-        buttonClicked = await page.evaluate(() => {
-          const dropdownItems = document.querySelectorAll('.artdeco-dropdown__content ul li');
-          
-          for (const item of Array.from(dropdownItems)) {
-            const text = item.textContent?.trim() || '';
-            if (text.includes('Se connecter') || text.includes('Connect')) {
-              const clickableDiv = item.querySelector('div') as HTMLElement;
-              if (clickableDiv) {
-                clickableDiv.click();
-                return true;
-              }
-            }
-          }
-          return false;
-        });
-
-        if (!buttonClicked) {
-          log.warn('Connect option not found in dropdown');
-          return { success: false, message: 'Connect option not found in dropdown' };
-        }
-
-        log.debug('Clicked connect option from dropdown');
+        log.debug('Clicked connect button (fallback flow)');
 
       } else {
-        log.error('Could not detect UI type');
+        log.error('Unknown UI type detected');
         return { success: false, message: 'Could not find connect button (unknown UI type)' };
       }
 
