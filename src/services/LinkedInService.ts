@@ -18,9 +18,61 @@ const log = createServiceLogger('LinkedIn');
  */
 class LinkedInService {
   private cacheService: CacheService;
+  private lastRequestTime: number = 0;
+  private minRequestInterval: number = 2000; // Minimum 2 seconds between requests
 
   constructor() {
     this.cacheService = new CacheService();
+  }
+
+  /**
+   * Enforce rate limiting between LinkedIn requests
+   * @private
+   */
+  private async enforceRateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    
+    if (timeSinceLastRequest < this.minRequestInterval) {
+      const waitTime = this.minRequestInterval - timeSinceLastRequest;
+      log.debug('Rate limiting: waiting before next request', { waitTime });
+      await this.wait(waitTime);
+    }
+    
+    this.lastRequestTime = Date.now();
+  }
+
+  /**
+   * Reset session by navigating to LinkedIn feed
+   * Used when rate limiting or navigation errors are detected
+   * @param page - Puppeteer page instance
+   * @private
+   */
+  private async resetToFeed(page: Page): Promise<void> {
+    log.info('Resetting session by navigating to LinkedIn feed');
+    
+    try {
+      await page.goto('https://www.linkedin.com/feed/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000,
+      });
+      
+      // Wait for feed to load
+      await Promise.race([
+        page.waitForSelector('.scaffold-layout__main', { timeout: 5000 }),
+        page.waitForSelector('main', { timeout: 5000 }),
+      ]).catch(() => {
+        log.debug('Feed load timeout, continuing');
+      });
+      
+      // Wait a bit for the page to stabilize
+      await this.wait(2000);
+      
+      log.info('Successfully reset to LinkedIn feed');
+    } catch (error: any) {
+      log.error('Failed to reset to feed', error);
+      throw new Error('Unable to reset session. Please try again later.');
+    }
   }
 
   /**
@@ -708,7 +760,16 @@ class LinkedInService {
           }
 
           // Reload the messaging page to ensure observer is still working
-          await monitoringPage.reload({ waitUntil: 'domcontentloaded' });
+          try {
+            await monitoringPage.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
+          } catch (reloadError: any) {
+            // If reload times out, check if page is still accessible
+            if (reloadError.message.includes('Navigation timeout')) {
+              log.warn('Monitoring page reload timeout - possible rate limiting, skipping refresh');
+              return; // Skip this refresh cycle
+            }
+            throw reloadError;
+          }
           await this.wait(2000);
 
           // Re-setup the observer after reload
@@ -919,6 +980,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Enforce rate limiting
+      await this.enforceRateLimit();
+      
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
@@ -1173,27 +1237,71 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Enforce rate limiting
+      await this.enforceRateLimit();
+      
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
       log.info('Reading conversation', { conversationUrl });
       
       // Navigate to the conversation with domcontentloaded (faster than networkidle2)
-      try {
-        await page.goto(conversationUrl, {
-          waitUntil: 'domcontentloaded',
-          timeout: 10000,
-        });
-      } catch (navError: any) {
-        // If navigation times out but page is loaded, continue
-        log.warn('Navigation timeout, checking if page loaded', { error: navError.message });
+      let navigationSucceeded = false;
+      let retryCount = 0;
+      const maxRetries = 1;
+      
+      while (!navigationSucceeded && retryCount <= maxRetries) {
+        try {
+          await page.goto(conversationUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 10000,
+          });
+          navigationSucceeded = true;
+        } catch (navError: any) {
+          // If navigation times out, check if we're being rate limited
+          if (navError.message.includes('Navigation timeout')) {
+            log.warn('Navigation timeout - possible rate limiting', { conversationUrl, retryCount });
+            
+            await this.wait(3000);
+            const currentUrl = page.url();
+            
+            // If we're on a messaging page, consider it successful
+            if (currentUrl.includes('linkedin.com/messaging/')) {
+              log.debug('Navigation timed out but page loaded', { currentUrl });
+              navigationSucceeded = true;
+            } else if (retryCount < maxRetries) {
+              // Reset to feed and retry
+              log.info('Resetting to feed before retry', { retryCount: retryCount + 1 });
+              await this.resetToFeed(page);
+              retryCount++;
+            } else {
+              throw new Error('LinkedIn may be rate limiting requests. Please wait a few minutes and try again.');
+            }
+          } else {
+            throw navError;
+          }
+        }
       }
 
       // Wait 4 seconds for page to fully load (good fiber connection)
       await this.wait(4000);
 
-      // Wait for messages
-      await page.waitForSelector('.msg-s-message-list', { timeout: 10000 });
+      // Wait for messages with better error handling
+      try {
+        await page.waitForSelector('.msg-s-message-list', { timeout: 10000 });
+      } catch (selectorError: any) {
+        // Check if we're on a rate limit or error page
+        const currentUrl = page.url();
+        const pageTitle = await page.title();
+        
+        log.error('Message list not found', { currentUrl, pageTitle });
+        
+        if (pageTitle.includes('Security Verification') || pageTitle.includes('Vérification')) {
+          throw new Error('LinkedIn security verification required. Please complete verification in browser.');
+        }
+        
+        throw new Error('Unable to load conversation. LinkedIn may be rate limiting requests. Please wait and try again.');
+      }
 
       // Extract messages
       const messages = await page.evaluate(DOMFunctions.extractConversationMessages);
@@ -1253,6 +1361,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Enforce rate limiting
+      await this.enforceRateLimit();
+      
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
@@ -1261,14 +1372,41 @@ class LinkedInService {
       // Navigate to the conversation with domcontentloaded (faster than networkidle2)
       const fullUrl = request.conversationUrl;
       
-      try {
-        await page.goto(fullUrl, {
-          waitUntil: 'domcontentloaded',
-          timeout: 10000,
-        });
-      } catch (navError: any) {
-        // If navigation times out but page is loaded, continue
-        log.warn('Navigation timeout, checking if page loaded', { error: navError.message });
+      let navigationSucceeded = false;
+      let retryCount = 0;
+      const maxRetries = 1;
+      
+      while (!navigationSucceeded && retryCount <= maxRetries) {
+        try {
+          await page.goto(fullUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 10000,
+          });
+          navigationSucceeded = true;
+        } catch (navError: any) {
+          // If navigation times out, check if we're being rate limited
+          if (navError.message.includes('Navigation timeout')) {
+            log.warn('Navigation timeout - possible rate limiting', { conversationUrl: fullUrl, retryCount });
+            
+            await this.wait(3000);
+            const currentUrl = page.url();
+            
+            // If we're on a messaging page, consider it successful
+            if (currentUrl.includes('linkedin.com/messaging/')) {
+              log.debug('Navigation timed out but page loaded', { currentUrl });
+              navigationSucceeded = true;
+            } else if (retryCount < maxRetries) {
+              // Reset to feed and retry
+              log.info('Resetting to feed before retry', { retryCount: retryCount + 1 });
+              await this.resetToFeed(page);
+              retryCount++;
+            } else {
+              throw new Error('LinkedIn may be rate limiting requests. Please wait a few minutes and try again.');
+            }
+          } else {
+            throw navError;
+          }
+        }
       }
 
       // Wait 4 seconds for page to fully load (good fiber connection)
@@ -1488,6 +1626,9 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Enforce rate limiting
+      await this.enforceRateLimit();
+      
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
@@ -1878,13 +2019,49 @@ class LinkedInService {
     const { page } = session;
 
     try {
+      // Enforce rate limiting
+      await this.enforceRateLimit();
+      
       log.info('Getting conversation URL', { profileUrl });
       
-      // Navigate to profile
-      await page.goto(profileUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 10000,
-      });
+      // Navigate to profile with error handling for rate limiting
+      let navigationSucceeded = false;
+      let retryCount = 0;
+      const maxRetries = 1;
+      
+      while (!navigationSucceeded && retryCount <= maxRetries) {
+        try {
+          await page.goto(profileUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 10000,
+          });
+          navigationSucceeded = true;
+        } catch (navError: any) {
+          // If navigation times out, check if we're being rate limited
+          if (navError.message.includes('Navigation timeout')) {
+            log.warn('Navigation timeout - possible rate limiting', { profileUrl, retryCount });
+            
+            // Wait and check current URL
+            await this.wait(3000);
+            const currentUrl = page.url();
+            
+            // If we're on the profile page, consider it successful
+            if (currentUrl.includes('linkedin.com/in/')) {
+              log.debug('Navigation timed out but page loaded', { currentUrl });
+              navigationSucceeded = true;
+            } else if (retryCount < maxRetries) {
+              // Reset to feed and retry
+              log.info('Resetting to feed before retry', { retryCount: retryCount + 1 });
+              await this.resetToFeed(page);
+              retryCount++;
+            } else {
+              throw new Error('LinkedIn may be rate limiting requests. Please wait a few minutes and try again.');
+            }
+          } else {
+            throw navError;
+          }
+        }
+      }
 
       // Log current URL to verify navigation
       const currentUrl = page.url();
