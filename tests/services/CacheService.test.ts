@@ -132,7 +132,21 @@ describe('CacheService', () => {
 
       // Assertion
       expect(mockClient.query).toHaveBeenCalledWith(
-        expect.stringContaining('CREATE INDEX IF NOT EXISTS idx_conversation_profile_url')
+        expect.stringContaining('CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_profile_url')
+      );
+    });
+
+    it('should create index on conversation_url', async () => {
+      // Setup
+      mockClient.query.mockResolvedValue({ rows: [] });
+      const service = new CacheService();
+
+      // Wait for initialization
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Assertion
+      expect(mockClient.query).toHaveBeenCalledWith(
+        expect.stringContaining('CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_url')
       );
     });
 
@@ -379,6 +393,27 @@ describe('CacheService', () => {
       );
     });
 
+    it('should retrieve cached conversation data by conversation_url', async () => {
+      // Setup
+      const conversationUrl = 'https://www.linkedin.com/messaging/thread/123';
+      const mockConversationData = [
+        { sender: 'John Doe', message: 'Hello!', timestamp: '2023-01-01' },
+      ];
+      mockClient.query.mockResolvedValue({
+        rows: [{ conversation_data: mockConversationData }],
+      });
+
+      // Execution
+      const result = await cacheService.getConversation(conversationUrl, 'conversation');
+
+      // Assertion
+      expect(result).toEqual(mockConversationData);
+      expect(mockClient.query).toHaveBeenCalledWith(
+        'SELECT conversation_data FROM linkedin_conversations WHERE conversation_url = $1',
+        [conversationUrl]
+      );
+    });
+
     it('should return null when conversation not found', async () => {
       // Setup
       const profileUrl = 'https://www.linkedin.com/in/nonexistent';
@@ -441,6 +476,27 @@ describe('CacheService', () => {
         expect.stringContaining('INSERT INTO linkedin_conversations'),
         [profileUrl, JSON.stringify(conversationData)]
       );
+    });
+
+    it('should insert new conversation into cache by conversation_url', async () => {
+      // Setup
+      const conversationUrl = 'https://www.linkedin.com/messaging/thread/123';
+      const conversationData = [
+        { sender: 'John Doe', message: 'Hello!', timestamp: '2023-01-01' },
+      ];
+      mockClient.query.mockResolvedValue({ rows: [] });
+
+      // Execution
+      await cacheService.cacheConversation(conversationUrl, conversationData, 'conversation');
+
+      // Assertion
+      expect(mockClient.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO linkedin_conversations'),
+        [conversationUrl, JSON.stringify(conversationData)]
+      );
+      // Check if it uses conversation_url in the query
+      expect(mockClient.query.mock.calls[0][0]).toContain('conversation_url');
+      expect(mockClient.query.mock.calls[0][0]).toContain('ON CONFLICT (conversation_url)');
     });
 
     it('should update existing conversation on conflict', async () => {

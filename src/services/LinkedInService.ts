@@ -184,6 +184,11 @@ class LinkedInService {
           '--no-first-run',
           '--no-zygote',
           '--single-process', // Required for some container environments
+          // Prevent background tab throttling
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=CalculateNativeWinOcclusion',
         ],
         defaultViewport: {
           width: 1366,
@@ -557,6 +562,38 @@ class LinkedInService {
             
             window.addEventListener('linkedin-new-message', (window as any).messageHandler);
           },
+
+          startHeartbeat: () => {
+            if ((window as any).monitoringHeartbeat) {
+              clearInterval((window as any).monitoringHeartbeat);
+            }
+
+            (window as any).monitoringHeartbeat = setInterval(() => {
+              console.log('💓 Monitoring Heartbeat');
+
+              // 1. Anti-Throttling: trivial DOM manipulation to prove activity
+              // This forces the browser to prioritize this tab's rendering
+              const tick = document.getElementById('monitoring-tick');
+              if (!tick) {
+                const div = document.createElement('div');
+                div.id = 'monitoring-tick';
+                div.style.display = 'none';
+                document.body.appendChild(div);
+              } else {
+                tick.innerText = Date.now().toString();
+              }
+
+              // 2. Observer Health Check
+              const conversationList = document.querySelector('.msg-conversations-container__conversations-list') ||
+                                       document.querySelector('ul[class*="msg-conversations"]');
+              
+              // If the list exists but our observer is disconnected (or the list was replaced by React)
+              if (conversationList && !(window as any).messageObserver) {
+                console.log('⚠️ Observer missing, restarting...');
+                window.dispatchEvent(new CustomEvent('linkedin-restart-observer'));
+              }
+            }, 10000); // Check every 10 seconds
+          },
         };
       });
 
@@ -748,7 +785,16 @@ class LinkedInService {
         (window as any).MessagingDOMFunctions.setupMessageEventListener();
       });
 
-      // Set up periodic refresh (every 15 minutes) as backup
+      // Set up heartbeat restart listener and start heartbeat
+      await monitoringPage.evaluate(() => {
+        window.addEventListener('linkedin-restart-observer', () => {
+          (window as any).MessagingDOMFunctions.setupMessageObserver();
+        });
+        // Start the heartbeat
+        (window as any).MessagingDOMFunctions.startHeartbeat();
+      });
+
+      // Set up periodic refresh (every 9 minutes) as backup
       const monitoringInterval = setInterval(async () => {
         try {
           log.debug('Periodic refresh (backup check)');
@@ -759,9 +805,20 @@ class LinkedInService {
             return;
           }
 
+          // Add mouse movement before reload to simulate user activity
+          try {
+            await monitoringPage.mouse.move(
+              Math.random() * 500,
+              Math.random() * 500
+            );
+            await this.wait(500);
+          } catch (e) {
+            // Ignore mouse movement errors
+          }
+
           // Reload the messaging page to ensure observer is still working
           try {
-            await monitoringPage.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
+            await monitoringPage.reload({ waitUntil: 'domcontentloaded', timeout: 20000 });
           } catch (reloadError: any) {
             // If reload times out, check if page is still accessible
             if (reloadError.message.includes('Navigation timeout')) {
@@ -833,11 +890,18 @@ class LinkedInService {
           } else {
             log.warn('Could not find conversation list element after reload');
           }
+          
+          // Restart the heartbeat after reload
+          await monitoringPage.evaluate(() => {
+            (window as any).MessagingDOMFunctions.setupMessageEventListener();
+            (window as any).MessagingDOMFunctions.startHeartbeat();
+          });
+          
           log.debug('Observer refresh completed');
         } catch (error: any) {
           log.error('Monitoring refresh error', error);
         }
-      }, 15 * 60 * 1000); // 15 minutes
+      }, 9 * 60 * 1000); // 9 minutes (safely under the 10-minute throttling threshold)
 
       // Store interval in session
       SessionManager.updateSession(sessionId, {

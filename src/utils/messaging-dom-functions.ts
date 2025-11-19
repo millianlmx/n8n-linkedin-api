@@ -162,4 +162,42 @@ export const MessagingDOMFunctions = {
     
     window.addEventListener('linkedin-new-message', (window as any).messageHandler);
   },
+
+  /**
+   * Starts a heartbeat that ensures the observer is alive
+   * and prevents the tab from sleeping
+   */
+  startHeartbeat: () => {
+    if ((window as any).monitoringHeartbeat) {
+      clearInterval((window as any).monitoringHeartbeat);
+    }
+
+    (window as any).monitoringHeartbeat = setInterval(() => {
+      console.log('💓 Monitoring Heartbeat');
+
+      // 1. Anti-Throttling: trivial DOM manipulation to prove activity
+      // This forces the browser to prioritize this tab's rendering
+      const tick = document.getElementById('monitoring-tick');
+      if (!tick) {
+        const div = document.createElement('div');
+        div.id = 'monitoring-tick';
+        div.style.display = 'none';
+        document.body.appendChild(div);
+      } else {
+        tick.innerText = Date.now().toString();
+      }
+
+      // 2. Observer Health Check
+      const conversationList = document.querySelector('.msg-conversations-container__conversations-list') ||
+                               document.querySelector('ul[class*="msg-conversations"]');
+      
+      // If the list exists but our observer is disconnected (or the list was replaced by React)
+      if (conversationList && !(window as any).messageObserver) {
+        console.log('⚠️ Observer missing, restarting...');
+        // Call the setup function we defined previously
+        // Note: You need to ensure setupMessageObserver is accessible here or call it via the exposed window function if setup that way
+        window.dispatchEvent(new CustomEvent('linkedin-restart-observer'));
+      }
+    }, 10000); // Check every 10 seconds
+  }
 };
