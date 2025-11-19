@@ -3,8 +3,10 @@ import SessionManager from './SessionManager';
 import { CacheService } from './CacheService';
 import CaptchaService from './CaptchaService';
 import BrowserStateService from './BrowserStateService';
+import MetricsService from './MetricsService';
 import { SendMessageRequest, LoginRequest, ProfileScrapeRequest } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
+import * as MessagingDOMFunctions from '../utils/messaging-dom-functions';
 import { createServiceLogger } from '../utils/logger';
 
 import { existsSync } from 'fs';
@@ -32,13 +34,13 @@ class LinkedInService {
   private async enforceRateLimit(): Promise<void> {
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
-    
+
     if (timeSinceLastRequest < this.minRequestInterval) {
       const waitTime = this.minRequestInterval - timeSinceLastRequest;
       log.debug('Rate limiting: waiting before next request', { waitTime });
       await this.wait(waitTime);
     }
-    
+
     this.lastRequestTime = Date.now();
   }
 
@@ -50,13 +52,13 @@ class LinkedInService {
    */
   private async resetToFeed(page: Page): Promise<void> {
     log.info('Resetting session by navigating to LinkedIn feed');
-    
+
     try {
       await page.goto('https://www.linkedin.com/feed/', {
         waitUntil: 'domcontentloaded',
         timeout: 15000,
       });
-      
+
       // Wait for feed to load
       await Promise.race([
         page.waitForSelector('.scaffold-layout__main', { timeout: 5000 }),
@@ -64,10 +66,10 @@ class LinkedInService {
       ]).catch(() => {
         log.debug('Feed load timeout, continuing');
       });
-      
+
       // Wait a bit for the page to stabilize
       await this.wait(2000);
-      
+
       log.info('Successfully reset to LinkedIn feed');
     } catch (error: any) {
       log.error('Failed to reset to feed', error);
@@ -162,13 +164,14 @@ class LinkedInService {
    * @returns Browser instance and new page
    */
   async initializeBrowser(userIdentifier?: string) {
+    const startTime = Date.now();
     log.info('Initializing browser', { userIdentifier });
-    
+
     const executablePath = this.findChrome();
     if (executablePath) {
       log.debug('Using Chrome executable', { path: executablePath });
     }
-    
+
     try {
       const browser = await puppeteer.launch({
         headless: process.env.HEADLESS ? true : false,
@@ -203,49 +206,51 @@ class LinkedInService {
       }
 
       const page = await browser.newPage();
-      
+
       // Forward console logs from browser to Node.js console
       page.on('console', (msg) => {
         const type = msg.type();
         const text = msg.text();
         if (type === 'log') log.debug('[Browser]', { message: text });
       });
-      
+
       // Set user agent to match real browser
       await page.setUserAgent(
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       );
-      
+
       // Try to restore browser state if user identifier is provided
       if (userIdentifier) {
         const hasState = await BrowserStateService.hasBrowserState(userIdentifier);
         if (hasState) {
           log.debug('Attempting to restore browser state', { userIdentifier });
           const restored = await BrowserStateService.restoreBrowserState(userIdentifier, page);
-          
+
           if (restored) {
             // Verify if the session is still valid
             const isValid = await BrowserStateService.verifySession(page);
-            
+
             if (isValid) {
               log.info('Browser state restored successfully', { userIdentifier });
+              MetricsService.trackBrowserLifecycle('init');
+              MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, true);
               return { browser, page, sessionRestored: true, isAuthenticated: true };
             } else {
               log.warn('Saved session expired', { userIdentifier });
               await BrowserStateService.deleteBrowserState(userIdentifier);
-              
+
               // Clear all cookies and storage to ensure a clean state
               log.debug('Clearing cookies and storage');
               const client = await page.target().createCDPSession();
               await client.send('Network.clearBrowserCookies');
               await client.send('Network.clearBrowserCache');
-              
+
               // Clear localStorage and sessionStorage
               await page.evaluate(() => {
                 localStorage.clear();
                 sessionStorage.clear();
               });
-              
+
               // Navigate to a blank page to reset the page state
               // This ensures the page is in a clean state for subsequent login attempts
               await page.goto('about:blank', { waitUntil: 'domcontentloaded' });
@@ -254,11 +259,14 @@ class LinkedInService {
           }
         }
       }
-      
+
       log.info('Browser initialized successfully');
+      MetricsService.trackBrowserLifecycle('init');
+      MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, true);
       return { browser, page, sessionRestored: false };
     } catch (error: any) {
       log.error('Failed to initialize browser', error);
+      MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, false);
       throw new Error(`Failed to initialize browser: ${error.message}`);
     }
   }
@@ -279,7 +287,7 @@ class LinkedInService {
 
     try {
       log.info('Initiating LinkedIn login', { sessionId });
-      
+
       const username = credentials.email || process.env.LINKEDIN_EMAIL;
       const password = credentials.password || process.env.LINKEDIN_PASSWORD;
 
@@ -293,11 +301,11 @@ class LinkedInService {
 
       // Wait for login form
       await page.waitForSelector('#username', { timeout: 10000 });
-      
+
       // Fill in credentials
       await page.type('#username', username, { delay: 100 });
       await page.type('#password', password, { delay: 100 });
-      
+
       // Click login button and wait for navigation
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
@@ -314,16 +322,16 @@ class LinkedInService {
       // Only check for CAPTCHA if we're on the challenge page
       if (currentUrl.includes('/checkpoint/challenge')) {
         log.warn('LinkedIn challenge page detected', { currentUrl });
-        
+
         // Check for CAPTCHA challenge
         const hasCaptcha = await CaptchaService.detectRecaptcha(page);
         if (hasCaptcha) {
           log.info('reCAPTCHA challenge detected');
-          
+
           if (CaptchaService.isAvailable()) {
             log.info('Attempting to solve CAPTCHA automatically');
             const solved = await CaptchaService.handleRecaptchaChallenge(page);
-            
+
             if (solved) {
               log.info('CAPTCHA solved successfully');
               await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {
@@ -344,22 +352,22 @@ class LinkedInService {
           throw new Error('LinkedIn security challenge detected. Please complete it manually in the browser.');
         }
       }
-      
+
       // Check for successful login indicators
-      const isLoggedIn = currentUrl.includes('/feed') || 
-                        currentUrl.includes('/check/add-phone') ||
-                        currentUrl.includes('/mynetwork') ||
-                        currentUrl.includes('/jobs') ||
-                        currentUrl.includes('/messaging') ||
-                        !currentUrl.includes('/login');
-      
+      const isLoggedIn = currentUrl.includes('/feed') ||
+        currentUrl.includes('/check/add-phone') ||
+        currentUrl.includes('/mynetwork') ||
+        currentUrl.includes('/jobs') ||
+        currentUrl.includes('/messaging') ||
+        !currentUrl.includes('/login');
+
       if (isLoggedIn && !currentUrl.includes('/checkpoint')) {
         SessionManager.updateSession(sessionId, {
           isAuthenticated: true,
         });
 
         log.info('Login successful', { sessionId });
-        
+
         // Save browser state (cookies, localStorage, sessionStorage)
         try {
           const userIdentifier = credentials.email || process.env.LINKEDIN_EMAIL || sessionId;
@@ -367,7 +375,7 @@ class LinkedInService {
         } catch (saveError: any) {
           log.warn('Failed to save browser state', saveError);
         }
-        
+
         // Automatically start message monitoring in a separate tab
         log.debug('Starting automatic message monitoring', { sessionId });
         try {
@@ -376,8 +384,8 @@ class LinkedInService {
         } catch (monitoringError: any) {
           log.warn('Failed to start automatic monitoring', { sessionId, error: monitoringError.message });
         }
-        
-        return { 
+
+        return {
           success: true,
           message: 'Login successful',
           redirectUrl: currentUrl
@@ -392,7 +400,7 @@ class LinkedInService {
         SessionManager.updateSession(sessionId, {
           isAuthenticated: true,
         });
-        return { 
+        return {
           success: true,
           message: 'Login completed (unknown state)',
           redirectUrl: currentUrl
@@ -419,7 +427,7 @@ class LinkedInService {
 
       // Create a new page for monitoring
       const monitoringPage = await session.browser.newPage();
-      
+
       // Forward console logs from browser to Node.js (excluding errors to reduce noise)
       monitoringPage.on('console', (msg) => {
         const type = msg.type();
@@ -427,7 +435,7 @@ class LinkedInService {
         if (type === 'log') log.debug('[Browser]', { message: text });
         // Skip browser errors to avoid polluting logs
       });
-      
+
       // Inject the MessagingDOMFunctions into the page context BEFORE navigation
       await monitoringPage.evaluateOnNewDocument(() => {
         (window as any).MessagingDOMFunctions = {
@@ -437,12 +445,12 @@ class LinkedInService {
 
             convElements.forEach((conv) => {
               const unreadBadge = conv.querySelector('.msg-conversation-card__unread-count');
-              
+
               if (unreadBadge) {
                 const nameEl = conv.querySelector('.msg-conversation-listitem__participant-names');
                 const conversationCard = conv.querySelector('.msg-conversation-card');
                 const conversationId = conversationCard?.id || '';
-                
+
                 if (nameEl && conversationId) {
                   const liId = conv.id;
                   const convData = {
@@ -464,24 +472,24 @@ class LinkedInService {
             }
 
             let conversationList = document.querySelector('#main > div > div.scaffold-layout__list-detail-inner.scaffold-layout__list-detail-inner--grow > div.scaffold-layout__list.msg__list > div.relative.display-flex.justify-center.flex-column.overflow-hidden.msg-conversations-container--inbox-shortcuts > ul');
-            
+
             if (!conversationList) {
               conversationList = document.querySelector('.msg-conversations-container__conversations-list') ||
-                               document.querySelector('ul[class*="msg-conversations"]') ||
-                               document.querySelector('.scaffold-layout__list ul');
+                document.querySelector('ul[class*="msg-conversations"]') ||
+                document.querySelector('.scaffold-layout__list ul');
             }
-            
+
             if (conversationList) {
               const observer = new MutationObserver((mutations) => {
                 let hasUnreadChanges = false;
-                
+
                 for (const mutation of mutations) {
                   if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
                       if (node.nodeType === Node.ELEMENT_NODE) {
                         const element = node as HTMLElement;
                         if (element.querySelector?.('.msg-conversation-card__unread-count') ||
-                            element.classList?.contains('msg-conversation-listitem')) {
+                          element.classList?.contains('msg-conversation-listitem')) {
                           hasUnreadChanges = true;
                         }
                       }
@@ -489,11 +497,11 @@ class LinkedInService {
                   } else if (mutation.type === 'attributes') {
                     const target = mutation.target as HTMLElement;
                     if (target.classList?.contains('msg-conversation-card__unread-count') ||
-                        target.querySelector?.('.msg-conversation-card__unread-count')) {
+                      target.querySelector?.('.msg-conversation-card__unread-count')) {
                       hasUnreadChanges = true;
                     }
                   }
-                  
+
                   if (hasUnreadChanges) break;
                 }
 
@@ -510,7 +518,7 @@ class LinkedInService {
               });
 
               (window as any).messageObserver = observer;
-              
+
               return {
                 success: true,
                 selector: conversationList.className || 'ul',
@@ -549,17 +557,17 @@ class LinkedInService {
             (window as any).messageHandler = () => {
               (window as any).handleNewMessage();
             };
-            
+
             window.addEventListener('linkedin-new-message', (window as any).messageHandler);
           },
 
           reSetupMessageEventListener: () => {
             window.removeEventListener('linkedin-new-message', (window as any).messageHandler);
-            
+
             (window as any).messageHandler = () => {
               (window as any).handleNewMessage();
             };
-            
+
             window.addEventListener('linkedin-new-message', (window as any).messageHandler);
           },
 
@@ -585,8 +593,8 @@ class LinkedInService {
 
               // 2. Observer Health Check
               const conversationList = document.querySelector('.msg-conversations-container__conversations-list') ||
-                                       document.querySelector('ul[class*="msg-conversations"]');
-              
+                document.querySelector('ul[class*="msg-conversations"]');
+
               // If the list exists but our observer is disconnected (or the list was replaced by React)
               if (conversationList && !(window as any).messageObserver) {
                 console.log('⚠️ Observer missing, restarting...');
@@ -620,7 +628,7 @@ class LinkedInService {
         const observerSetup = await monitoringPage.evaluate(() => {
           // Inject DOM functions into window
           (window as any).processUnreadConversations = (window as any).MessagingDOMFunctions.processUnreadConversations;
-          
+
           // Setup the observer
           return (window as any).MessagingDOMFunctions.setupMessageObserver();
         });
@@ -635,12 +643,12 @@ class LinkedInService {
         if (isProcessing) {
           return;
         }
-        
+
         isProcessing = true;
-        
+
         try {
           log.debug('Processing new message notification');
-          
+
           // Get unread conversations
           const conversations = await monitoringPage.evaluate(() => {
             return (window as any).processUnreadConversations();
@@ -648,55 +656,55 @@ class LinkedInService {
 
           if (conversations.length > 0) {
             log.info('Found unread conversations', { count: conversations.length });
-            
+
             // Process each unread conversation
             for (const conv of conversations) {
               try {
                 log.debug('Processing conversation', { name: conv.name });
-                
+
                 // Click on the conversation to open it
                 await monitoringPage.evaluate((elementId) => {
                   return (window as any).MessagingDOMFunctions.clickConversation(elementId);
                 }, conv.elementId);
-                
+
                 // Wait for the conversation to load
                 await this.wait(2000);
-                
+
                 // Get the current URL which should now be the conversation URL
                 const currentUrl = monitoringPage.url();
                 log.debug('Conversation URL extracted', { url: currentUrl });
-                
+
                 // Extract shortened profile URL from the thread detail section
                 const shortenedProfileUrl = await monitoringPage.evaluate(() => {
                   return (window as any).MessagingDOMFunctions.extractProfileUrl();
                 });
-                
+
                 if (!shortenedProfileUrl) {
                   log.warn('Could not extract profile URL', { name: conv.name });
                   continue;
                 }
-                
+
                 // Open the shortened URL in a new tab to get the real profile URL
                 const profilePage = await session.browser.newPage();
                 let cleanProfileUrl: string;
-                
+
                 try {
                   // Navigate to the shortened URL (don't wait for full load)
                   await profilePage.goto(shortenedProfileUrl, {
                     waitUntil: 'domcontentloaded',
                     timeout: 10000,
                   });
-                  
+
                   // Wait 3 seconds for redirect to complete
                   await this.wait(3000);
-                  
+
                   // Get the real profile URL from the browser
                   const realProfileUrl = profilePage.url();
-                  
+
                   // Clean profile URL (remove query params)
                   cleanProfileUrl = realProfileUrl.split('?')[0];
                   log.debug('Profile URL extracted', { profileUrl: cleanProfileUrl });
-                  
+
                   // Close the profile page
                   await profilePage.close();
                 } catch (error: any) {
@@ -707,10 +715,10 @@ class LinkedInService {
 
                 // Get existing cached messages
                 const cachedMessages = await this.cacheService.getConversation(cleanProfileUrl);
-                
+
                 // Fetch only the visible new messages from LinkedIn (no scrolling)
                 const newMessages = await this.readConversationInternal(monitoringPage, currentUrl, cleanProfileUrl, false);
-                
+
                 // Merge: append new messages to existing cache
                 let updatedMessages;
                 if (cachedMessages && Array.isArray(cachedMessages)) {
@@ -718,11 +726,11 @@ class LinkedInService {
                   const existingMessageIds = new Set(
                     cachedMessages.map((m: any) => `${m.sender}_${m.timestamp}_${m.message}`)
                   );
-                  
-                  const uniqueNewMessages = newMessages.filter((m: any) => 
+
+                  const uniqueNewMessages = newMessages.filter((m: any) =>
                     !existingMessageIds.has(`${m.sender}_${m.timestamp}_${m.message}`)
                   );
-                  
+
                   // Append new messages to the end
                   updatedMessages = [...cachedMessages, ...uniqueNewMessages];
                   log.info('Added new messages', { count: uniqueNewMessages.length, name: conv.name });
@@ -731,25 +739,25 @@ class LinkedInService {
                   updatedMessages = newMessages;
                   log.debug('Cached messages', { count: newMessages.length, name: conv.name });
                 }
-                
+
                 // Update cache with merged messages
                 await this.cacheService.cacheConversation(cleanProfileUrl, updatedMessages);
-                
+
               } catch (error: any) {
                 log.error('Failed to process conversation', error, { name: conv.name });
               }
             }
-            
+
             // After processing all conversations, navigate back to messaging list
             log.debug('Returning to messaging list');
             await monitoringPage.goto('https://www.linkedin.com/messaging/', {
               waitUntil: 'domcontentloaded',
               timeout: 15000,
             });
-            
+
             // Wait for page to stabilize
             await this.wait(2000);
-            
+
             // Re-setup the observer
             const reObserverSetup = await setupObserver();
             if (reObserverSetup.success) {
@@ -757,7 +765,7 @@ class LinkedInService {
             } else {
               log.warn('Failed to re-establish observer');
             }
-            
+
             // Re-setup event listener (critical - gets lost on navigation)
             await monitoringPage.evaluate(() => {
               (window as any).MessagingDOMFunctions.reSetupMessageEventListener();
@@ -798,7 +806,7 @@ class LinkedInService {
       const monitoringInterval = setInterval(async () => {
         try {
           log.debug('Periodic refresh (backup check)');
-          
+
           if (monitoringPage.isClosed()) {
             log.warn('Monitoring page closed, stopping monitoring');
             clearInterval(monitoringInterval);
@@ -832,26 +840,26 @@ class LinkedInService {
           // Re-setup the observer after reload
           const observerReestablished = await monitoringPage.evaluate(() => {
             let conversationList = document.querySelector('#main > div > div.scaffold-layout__list-detail-inner.scaffold-layout__list-detail-inner--grow > div.scaffold-layout__list.msg__list > div.relative.display-flex.justify-center.flex-column.overflow-hidden.msg-conversations-container--inbox-shortcuts > ul');
-            
+
             if (!conversationList) {
               conversationList = document.querySelector('.msg-conversations-container__conversations-list') ||
-                               document.querySelector('ul[class*="msg-conversations"]') ||
-                               document.querySelector('.scaffold-layout__list ul');
+                document.querySelector('ul[class*="msg-conversations"]') ||
+                document.querySelector('.scaffold-layout__list ul');
             }
-            
+
             if (conversationList && !(window as any).messageObserver) {
               // Note: Cannot use log.debug here as we're in browser context
-              
+
               const observer = new MutationObserver((mutations) => {
                 let hasUnreadChanges = false;
-                
+
                 for (const mutation of mutations) {
                   if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
                       if (node.nodeType === Node.ELEMENT_NODE) {
                         const element = node as HTMLElement;
                         if (element.querySelector?.('.msg-conversation-card__unread-count') ||
-                            element.classList?.contains('msg-conversation-listitem')) {
+                          element.classList?.contains('msg-conversation-listitem')) {
                           hasUnreadChanges = true;
                         }
                       }
@@ -859,11 +867,11 @@ class LinkedInService {
                   } else if (mutation.type === 'attributes') {
                     const target = mutation.target as HTMLElement;
                     if (target.classList?.contains('msg-conversation-card__unread-count') ||
-                        target.querySelector?.('.msg-conversation-card__unread-count')) {
+                      target.querySelector?.('.msg-conversation-card__unread-count')) {
                       hasUnreadChanges = true;
                     }
                   }
-                  
+
                   if (hasUnreadChanges) break;
                 }
 
@@ -890,13 +898,13 @@ class LinkedInService {
           } else {
             log.warn('Could not find conversation list element after reload');
           }
-          
+
           // Restart the heartbeat after reload
           await monitoringPage.evaluate(() => {
             (window as any).MessagingDOMFunctions.setupMessageEventListener();
             (window as any).MessagingDOMFunctions.startHeartbeat();
           });
-          
+
           log.debug('Observer refresh completed');
         } catch (error: any) {
           log.error('Monitoring refresh error', error);
@@ -955,10 +963,10 @@ class LinkedInService {
   private async extractProfileUrlFromConversation(page: Page, conversationUrl: string): Promise<string | null> {
     try {
       // Navigate to conversation
-      const fullUrl = conversationUrl.startsWith('http') 
-        ? conversationUrl 
+      const fullUrl = conversationUrl.startsWith('http')
+        ? conversationUrl
         : `https://www.linkedin.com${conversationUrl}`;
-      
+
       await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
       await this.wait(2000); // Wait for conversation to fully load
 
@@ -971,7 +979,7 @@ class LinkedInService {
           '.msg-entity-lockup__entity-title a',
           '.msg-thread__topbar a[href*="/in/"]'
         ];
-        
+
         for (const selector of selectors) {
           const link = document.querySelector(selector) as HTMLAnchorElement;
           if (link && link.href && link.href.includes('/in/')) {
@@ -980,7 +988,7 @@ class LinkedInService {
             return url;
           }
         }
-        
+
         return null;
       });
 
@@ -1000,10 +1008,10 @@ class LinkedInService {
    */
   private async readConversationInternal(page: Page, conversationUrl: string, profileUrl: string, forceCache: boolean = false) {
     try {
-      const fullUrl = conversationUrl.startsWith('http') 
-        ? conversationUrl 
+      const fullUrl = conversationUrl.startsWith('http')
+        ? conversationUrl
         : `https://www.linkedin.com${conversationUrl}`;
-        
+
       await page.goto(fullUrl, {
         waitUntil: 'networkidle2',
         timeout: 30000,
@@ -1030,6 +1038,7 @@ class LinkedInService {
    * @returns Scraped profile data (from cache or fresh scrape)
    */
   async scrapeProfile(sessionId: string, request: ProfileScrapeRequest) {
+    const startTime = Date.now();
     const session = SessionManager.getSession(sessionId);
     if (!session || !session.isAuthenticated) {
       throw new Error('Not authenticated');
@@ -1038,20 +1047,23 @@ class LinkedInService {
     const cachedProfile = await this.cacheService.getProfile(request.url);
     if (cachedProfile) {
       log.debug('Returning cached profile', { url: request.url });
+      MetricsService.trackCacheOperation('get', 'hit');
       return { success: true, data: cachedProfile };
     }
+
+    MetricsService.trackCacheOperation('get', 'miss');
 
     const { page } = session;
 
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
-      
+
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
       log.info('Scraping profile', { url: request.url });
-      
+
       // Navigate to profile with domcontentloaded (faster than networkidle2)
       await page.goto(request.url, {
         waitUntil: 'domcontentloaded',
@@ -1070,7 +1082,7 @@ class LinkedInService {
 
       // Wait for content to render after scrolling
       await this.wait(1000);
-      
+
       log.debug('Page content loaded');
 
       // Extract profile data using extracted DOM function
@@ -1080,15 +1092,25 @@ class LinkedInService {
 
       // Save to cache
       await this.cacheService.cacheProfile(request.url, profileData);
+      MetricsService.trackCacheOperation('set', 'success');
 
       // Switch back to monitoring page
       await this.switchToMonitoringPage(sessionId);
+
+      // Track successful operation
+      const duration = (Date.now() - startTime) / 1000;
+      MetricsService.trackLinkedInOperation('profile_scrape', duration, true);
 
       return { success: true, data: profileData };
     } catch (error: any) {
       log.error('Profile scraping failed', error);
       // Switch back to monitoring page even on error
       await this.switchToMonitoringPage(sessionId);
+
+      // Track failed operation
+      const duration = (Date.now() - startTime) / 1000;
+      MetricsService.trackLinkedInOperation('profile_scrape', duration, false);
+
       throw new Error(`Profile scraping failed: ${error.message}`);
     }
   }
@@ -1103,7 +1125,7 @@ class LinkedInService {
 
     try {
       log.info('Fetching conversations', { sessionId });
-      
+
       // Navigate to messaging
       await page.goto('https://www.linkedin.com/messaging/', {
         waitUntil: 'domcontentloaded',
@@ -1112,7 +1134,7 @@ class LinkedInService {
 
       // Wait for conversations list to load
       await page.waitForSelector('.msg-conversations-container__conversations-list', { timeout: 10000 });
-      
+
       // Wait a bit for conversations to render
       await this.wait(2000);
 
@@ -1121,13 +1143,13 @@ class LinkedInService {
         const scrollContainer = document.querySelector(
           '#main > div > div.scaffold-layout__list-detail-inner.scaffold-layout__list-detail-inner--grow > div.scaffold-layout__list.msg__list > div.relative.display-flex.justify-center.flex-column.overflow-hidden.msg-conversations-container--inbox-shortcuts > ul'
         );
-        
+
         if (scrollContainer) {
           // Scroll to bottom multiple times to load more conversations
           const scrollHeight = scrollContainer.scrollHeight;
           let currentScroll = 0;
           const scrollStep = 500;
-          
+
           const scrollInterval = setInterval(() => {
             if (currentScroll < scrollHeight) {
               currentScroll += scrollStep;
@@ -1136,7 +1158,7 @@ class LinkedInService {
               clearInterval(scrollInterval);
             }
           }, 100);
-          
+
           // Wait for scroll to complete
           setTimeout(() => clearInterval(scrollInterval), 3000);
         }
@@ -1215,7 +1237,7 @@ class LinkedInService {
 
     try {
       log.info('Getting unread messages', { sessionId });
-      
+
       // Navigate to messaging page
       await page.goto('https://www.linkedin.com/messaging/', {
         waitUntil: 'networkidle2',
@@ -1233,11 +1255,11 @@ class LinkedInService {
 
       // Click on each unread conversation to get URL
       const unreadWithUrls: any[] = [];
-      
+
       for (let i = 0; i < unreadConversations.length; i++) {
         try {
           const conv = unreadConversations[i];
-          
+
           // Click on the conversation
           await page.evaluate((index) => {
             const convItems = document.querySelectorAll('li.msg-conversation-listitem');
@@ -1287,12 +1309,12 @@ class LinkedInService {
     if (profileUrl && !forceRefresh) {
       log.debug('Checking cache for conversation', { profileUrl });
       const cachedConversation = await this.cacheService.getConversation(profileUrl);
-      
+
       if (cachedConversation) {
         log.debug('Cache hit - returning cached conversation');
         return { success: true, data: cachedConversation, cached: true, cacheUpdated: false };
       }
-      
+
       log.debug('Cache miss - fetching from LinkedIn');
     } else if (forceRefresh && profileUrl) {
       log.debug('Force refresh enabled - fetching from LinkedIn');
@@ -1303,17 +1325,17 @@ class LinkedInService {
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
-      
+
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
       log.info('Reading conversation', { conversationUrl });
-      
+
       // Navigate to the conversation with domcontentloaded (faster than networkidle2)
       let navigationSucceeded = false;
       let retryCount = 0;
       const maxRetries = 1;
-      
+
       while (!navigationSucceeded && retryCount <= maxRetries) {
         try {
           await page.goto(conversationUrl, {
@@ -1325,10 +1347,10 @@ class LinkedInService {
           // If navigation times out, check if we're being rate limited
           if (navError.message.includes('Navigation timeout')) {
             log.warn('Navigation timeout - possible rate limiting', { conversationUrl, retryCount });
-            
+
             await this.wait(3000);
             const currentUrl = page.url();
-            
+
             // If we're on a messaging page, consider it successful
             if (currentUrl.includes('linkedin.com/messaging/')) {
               log.debug('Navigation timed out but page loaded', { currentUrl });
@@ -1357,13 +1379,13 @@ class LinkedInService {
         // Check if we're on a rate limit or error page
         const currentUrl = page.url();
         const pageTitle = await page.title();
-        
+
         log.error('Message list not found', { currentUrl, pageTitle });
-        
+
         if (pageTitle.includes('Security Verification') || pageTitle.includes('Vérification')) {
           throw new Error('LinkedIn security verification required. Please complete verification in browser.');
         }
-        
+
         throw new Error('Unable to load conversation. LinkedIn may be rate limiting requests. Please wait and try again.');
       }
 
@@ -1371,20 +1393,20 @@ class LinkedInService {
       const messages = await page.evaluate(DOMFunctions.extractConversationMessages);
 
       log.info('Successfully read conversation', { messageCount: messages.length });
-      
+
       // Track if cache was updated
       let cacheUpdated = false;
-      
+
       // Cache the conversation if profileUrl is provided
       if (profileUrl) {
         // If force refresh, check if data has changed before updating cache
         if (forceRefresh) {
           const cachedConversation = await this.cacheService.getConversation(profileUrl);
-          
+
           // Compare fresh data with cached data
-          const hasChanges = !cachedConversation || 
-                            JSON.stringify(cachedConversation) !== JSON.stringify(messages);
-          
+          const hasChanges = !cachedConversation ||
+            JSON.stringify(cachedConversation) !== JSON.stringify(messages);
+
           if (hasChanges) {
             await this.cacheService.cacheConversation(profileUrl, messages);
             cacheUpdated = true;
@@ -1403,7 +1425,7 @@ class LinkedInService {
           log.info('Conversation cached', { messageCount: messages.length });
         }
       }
-      
+
       // Switch back to monitoring page
       await this.switchToMonitoringPage(sessionId);
 
@@ -1427,19 +1449,19 @@ class LinkedInService {
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
-      
+
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
       log.info('Sending message', { conversationUrl: request.conversationUrl });
-      
+
       // Navigate to the conversation with domcontentloaded (faster than networkidle2)
       const fullUrl = request.conversationUrl;
-      
+
       let navigationSucceeded = false;
       let retryCount = 0;
       const maxRetries = 1;
-      
+
       while (!navigationSucceeded && retryCount <= maxRetries) {
         try {
           await page.goto(fullUrl, {
@@ -1451,10 +1473,10 @@ class LinkedInService {
           // If navigation times out, check if we're being rate limited
           if (navError.message.includes('Navigation timeout')) {
             log.warn('Navigation timeout - possible rate limiting', { conversationUrl: fullUrl, retryCount });
-            
+
             await this.wait(3000);
             const currentUrl = page.url();
-            
+
             // If we're on a messaging page, consider it successful
             if (currentUrl.includes('linkedin.com/messaging/')) {
               log.debug('Navigation timed out but page loaded', { currentUrl });
@@ -1488,7 +1510,7 @@ class LinkedInService {
 
       // Click send button - try multiple selectors
       let buttonClicked = false;
-      
+
       // Try selector 1: Class-based selector
       try {
         const sendButton = await page.$('.msg-form__send-button');
@@ -1506,8 +1528,8 @@ class LinkedInService {
         try {
           await page.evaluate(() => {
             const buttons = Array.from(document.querySelectorAll('button'));
-            const sendBtn = buttons.find(btn => 
-              btn.textContent?.trim() === 'Envoyer' || 
+            const sendBtn = buttons.find(btn =>
+              btn.textContent?.trim() === 'Envoyer' ||
               btn.textContent?.trim() === 'Send'
             );
             if (sendBtn) {
@@ -1562,39 +1584,39 @@ class LinkedInService {
       if (request.profileUrl) {
         try {
           log.debug('Updating cache with sent message', { profileUrl: request.profileUrl });
-          
+
           // Get existing cached messages
           const cachedMessages = await this.cacheService.getConversation(request.profileUrl) || [];
-          
+
           // Create the new message object
           const now = new Date();
-          const months = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 
-                          'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+          const months = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+            'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
           const day = now.getDate();
           const month = months[now.getMonth()];
           const hours = now.getHours().toString().padStart(2, '0');
           const minutes = now.getMinutes().toString().padStart(2, '0');
           const timestamp = `${day} ${month} ${hours}:${minutes}`;
-          
+
           const newMessage = {
             sender: 'You', // Sent by the current user
             message: request.message,
             timestamp
           };
-          
+
           // Append the new message to the cache
           const updatedMessages = [...cachedMessages, newMessage];
           await this.cacheService.cacheConversation(request.profileUrl, updatedMessages);
-          
-          log.info('Cache updated with sent message', { 
-            profileUrl: request.profileUrl, 
-            messageCount: updatedMessages.length 
+
+          log.info('Cache updated with sent message', {
+            profileUrl: request.profileUrl,
+            messageCount: updatedMessages.length
           });
         } catch (cacheError: any) {
           // Don't fail the whole operation if cache update fails
-          log.warn('Failed to update cache after sending message', { 
+          log.warn('Failed to update cache after sending message', {
             error: cacheError.message,
-            profileUrl: request.profileUrl 
+            profileUrl: request.profileUrl
           });
         }
       } else {
@@ -1626,7 +1648,7 @@ class LinkedInService {
       await this.switchToOperationPage(sessionId);
 
       log.info('Visiting profile', { profileUrl });
-      
+
       // Navigate to profile with domcontentloaded (faster)
       await page.goto(profileUrl, {
         waitUntil: 'domcontentloaded',
@@ -1648,21 +1670,21 @@ class LinkedInService {
           let scrollCount = 0;
           const maxScrolls = 3;
           const scrollStep = window.innerHeight / 2;
-          
+
           const scroll = () => {
             if (scrollCount >= maxScrolls) {
               resolve();
               return;
             }
-            
+
             window.scrollBy({ top: scrollStep, behavior: 'smooth' });
             scrollCount++;
-            
+
             // Use requestAnimationFrame for natural timing (typically 16ms per frame)
             // Wait ~300ms between scrolls (natural human behavior)
             setTimeout(() => requestAnimationFrame(scroll), 300);
           };
-          
+
           scroll();
         });
       });
@@ -1692,12 +1714,12 @@ class LinkedInService {
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
-      
+
       // Switch to operation page
       await this.switchToOperationPage(sessionId);
 
       log.info('Sending connection request', { profileUrl });
-      
+
       // Navigate to profile
       await page.goto(profileUrl, {
         waitUntil: 'domcontentloaded',
@@ -1732,8 +1754,8 @@ class LinkedInService {
       const connectionCheck = await page.evaluate(() => {
         // Try multiple selectors for profile header (LinkedIn changes classes frequently)
         const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-                             document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-                             document.querySelector('div.ph5');
+          document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+          document.querySelector('div.ph5');
 
         if (!profileHeader) {
           return { uiType: 'unknown', hasConnectButton: false };
@@ -1743,7 +1765,7 @@ class LinkedInService {
         const directConnectButton = profileHeader.querySelector(
           'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > button'
         ) as HTMLButtonElement;
-        
+
         if (directConnectButton) {
           const buttonText = directConnectButton.textContent?.trim() || '';
           if (buttonText.includes('Se connecter') || buttonText.includes('Connect')) {
@@ -1755,7 +1777,7 @@ class LinkedInService {
         const moreButton = profileHeader.querySelector(
           'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > button'
         ) as HTMLButtonElement;
-        
+
         if (moreButton) {
           return { uiType: 'dropdown', hasConnectButton: true };
         }
@@ -1766,11 +1788,11 @@ class LinkedInService {
             const text = btn.textContent?.trim() || '';
             return text.includes('Se connecter') || text.includes('Connect');
           });
-        
+
         if (fallbackButton) {
           return { uiType: 'regular', hasConnectButton: true };
         }
-        
+
         return { uiType: 'none', hasConnectButton: false };
       });
 
@@ -1787,18 +1809,18 @@ class LinkedInService {
       if (connectionCheck.uiType === 'direct') {
         // Direct "Se connecter" button flow
         log.debug('Using direct connect button flow');
-        
+
         buttonClicked = await page.evaluate(() => {
           const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-                               document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-                               document.querySelector('div.ph5');
-          
+            document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+            document.querySelector('div.ph5');
+
           if (!profileHeader) return false;
-          
+
           const directConnectButton = profileHeader.querySelector(
             'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > button'
           ) as HTMLButtonElement;
-          
+
           if (directConnectButton) {
             const buttonText = directConnectButton.textContent?.trim() || '';
             if (buttonText.includes('Se connecter') || buttonText.includes('Connect')) {
@@ -1806,7 +1828,7 @@ class LinkedInService {
               return true;
             }
           }
-          
+
           return false;
         });
 
@@ -1820,19 +1842,19 @@ class LinkedInService {
       } else if (connectionCheck.uiType === 'dropdown') {
         // Dropdown flow: Click "More" button, then find "Se connecter" in dropdown
         log.debug('Using dropdown flow');
-        
+
         // Click the "More" dropdown button
         const moreButtonClicked = await page.evaluate(() => {
           const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-                               document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-                               document.querySelector('div.ph5');
-          
+            document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+            document.querySelector('div.ph5');
+
           if (!profileHeader) return false;
-          
+
           const moreButton = profileHeader.querySelector(
             'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > button'
           ) as HTMLButtonElement;
-          
+
           if (moreButton) {
             moreButton.click();
             return true;
@@ -1851,19 +1873,19 @@ class LinkedInService {
         // Click "Se connecter" in the dropdown menu
         buttonClicked = await page.evaluate(() => {
           const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-                               document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-                               document.querySelector('div.ph5');
-          
+            document.querySelector('section.artdeco-card > div.ph5.pb5') ||
+            document.querySelector('div.ph5');
+
           if (!profileHeader) return false;
-          
+
           const dropdownMenu = profileHeader.querySelector(
             'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > div > div > ul'
           );
-          
+
           if (!dropdownMenu) return false;
-          
+
           const menuItems = dropdownMenu.querySelectorAll('li > div');
-          
+
           for (const item of Array.from(menuItems)) {
             const text = item.textContent?.trim() || '';
             if (text.includes('Se connecter') || text.includes('Connect')) {
@@ -1884,13 +1906,13 @@ class LinkedInService {
       } else if (connectionCheck.uiType === 'regular') {
         // Fallback regular flow: Try to find any connect button
         log.debug('Using fallback regular profile flow');
-        
+
         buttonClicked = await page.evaluate(() => {
           // Try aria-label selector first
           let connectButton = document.querySelector(
             'button[aria-label*="Invitez"]'
           ) as HTMLButtonElement;
-          
+
           if (!connectButton) {
             // Try finding by button text content
             const buttons = Array.from(document.querySelectorAll('button.artdeco-button--primary'));
@@ -1899,12 +1921,12 @@ class LinkedInService {
               return text.includes('Se connecter') || text.includes('Connect');
             }) as HTMLButtonElement;
           }
-          
+
           if (connectButton) {
             connectButton.click();
             return true;
           }
-          
+
           return false;
         });
 
@@ -1928,21 +1950,21 @@ class LinkedInService {
 
       if (hasAddNoteButton && message) {
         log.debug('Add note button found');
-        
+
         // Click "Ajouter une note" button
         const noteButtonClicked = await page.evaluate(DOMFunctions.clickAddNoteButton);
 
         if (noteButtonClicked) {
           log.debug('Clicked add note button');
-          
+
           // Wait for textarea to appear
           await this.wait(300);
-          
+
           // Type the message in the textarea
           log.debug('Adding custom message');
-          
+
           await page.evaluate(DOMFunctions.typeNoteMessage, message);
-          
+
           await this.wait(200);
           log.debug('Message added to connection request');
         }
@@ -1950,7 +1972,7 @@ class LinkedInService {
 
       // Click the "Envoyer une invitation" button
       await this.wait(200);
-      
+
       const sendClicked = await page.evaluate(DOMFunctions.clickSendInvitation);
 
       if (!sendClicked) {
@@ -1959,7 +1981,7 @@ class LinkedInService {
       }
 
       log.info('Connection request sent successfully', { profileUrl });
-      
+
       // Wait briefly for confirmation
       await this.wait(300);
 
@@ -1988,7 +2010,7 @@ class LinkedInService {
       await this.switchToOperationPage(sessionId);
 
       log.info('Fetching profile views', { sessionId });
-      
+
       // Navigate to own profile
       await page.goto('https://www.linkedin.com/me/', {
         waitUntil: 'networkidle2',
@@ -2005,8 +2027,8 @@ class LinkedInService {
       // Switch back to monitoring page
       await this.switchToMonitoringPage(sessionId);
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         data: {
           profile: profileData
         }
@@ -2029,7 +2051,7 @@ class LinkedInService {
 
     try {
       log.info('Searching for people', { keywords, limit });
-      
+
       // Navigate to search
       const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(keywords)}`;
       await page.goto(searchUrl, {
@@ -2085,14 +2107,14 @@ class LinkedInService {
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
-      
+
       log.info('Getting conversation URL', { profileUrl });
-      
+
       // Navigate to profile with error handling for rate limiting
       let navigationSucceeded = false;
       let retryCount = 0;
       const maxRetries = 1;
-      
+
       while (!navigationSucceeded && retryCount <= maxRetries) {
         try {
           await page.goto(profileUrl, {
@@ -2104,11 +2126,11 @@ class LinkedInService {
           // If navigation times out, check if we're being rate limited
           if (navError.message.includes('Navigation timeout')) {
             log.warn('Navigation timeout - possible rate limiting', { profileUrl, retryCount });
-            
+
             // Wait and check current URL
             await this.wait(3000);
             const currentUrl = page.url();
-            
+
             // If we're on the profile page, consider it successful
             if (currentUrl.includes('linkedin.com/in/')) {
               log.debug('Navigation timed out but page loaded', { currentUrl });
@@ -2161,35 +2183,35 @@ class LinkedInService {
       // Check if we hit a login page/modal
       if (connectionStatus.status === 'not_authenticated') {
         log.error('Session expired or login required', { currentUrl });
-        
+
         // Mark session as not authenticated
         SessionManager.updateSession(sessionId, {
           isAuthenticated: false,
         });
-        
+
         throw new Error('Session expired. Please login again.');
       }
 
       // If pending, check if Message button is available (Premium users can message pending connections)
       if (connectionStatus.status === 'pending') {
         log.info('Connection request is pending - checking if messaging is available', { profileUrl });
-        
+
         // Check if Message button exists (Premium feature)
         const hasMessageButton = await page.evaluate(() => {
           const messageButton = Array.from(document.querySelectorAll('button')).find(btn => {
             const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || '';
             const text = btn.textContent?.toLowerCase() || '';
-            return ariaLabel.includes('message') || ariaLabel.includes('envoyer un message') || 
-                   text.includes('message');
+            return ariaLabel.includes('message') || ariaLabel.includes('envoyer un message') ||
+              text.includes('message');
           });
           return !!messageButton;
         });
-        
+
         if (!hasMessageButton) {
           log.warn('Connection pending and no message button found', { profileUrl });
           throw new Error('Connection request is pending. Wait for acceptance or upgrade to Premium to message.');
         }
-        
+
         log.info('Message button available despite pending connection (Premium)', { profileUrl });
         // Continue to get conversation URL
       } else if (!connectionStatus.connected) {
@@ -2239,8 +2261,8 @@ class LinkedInService {
       const conversationUrl = page.url();
       log.info('Conversation URL retrieved', { conversationUrl });
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         data: {
           profileName,
           conversationUrl

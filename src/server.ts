@@ -6,6 +6,8 @@ import profileRoutes from './routes/profile.routes';
 import connectionRoutes from './routes/connection.routes';
 import messageRoutes from './routes/message.routes';
 import searchRoutes from './routes/search.routes';
+import metricsRoutes from './routes/metrics.routes';
+import { metricsMiddleware } from './middleware/metrics.middleware';
 import SessionManager from './services/SessionManager';
 import LinkedInService from './services/LinkedInService';
 import { createServiceLogger } from './utils/logger';
@@ -25,6 +27,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Metrics middleware - must be registered early to track all requests
+app.use(metricsMiddleware);
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -49,7 +54,7 @@ app.get('/api/session', (req: Request, res: Response) => {
       message: 'No active session. Auto-initialization may have failed.',
     });
   }
-  
+
   const session = SessionManager.getSession(globalSessionId);
   if (!session) {
     return res.status(404).json({
@@ -57,7 +62,7 @@ app.get('/api/session', (req: Request, res: Response) => {
       message: 'Session not found',
     });
   }
-  
+
   res.json({
     success: true,
     sessionId: globalSessionId,
@@ -66,6 +71,9 @@ app.get('/api/session', (req: Request, res: Response) => {
     currentUrl: session.page.url(),
   });
 });
+
+// Metrics routes (must be registered before other routes to avoid being caught by middleware)
+app.use(metricsRoutes);
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -149,26 +157,26 @@ process.on('SIGINT', async () => {
 async function autoInitialize() {
   try {
     log.info('\n🚀 Auto-initializing LinkedIn session...\n');
-    
+
     // Initialize browser
     log.info('📥 Initializing browser...');
     const result = await LinkedInService.initializeBrowser(process.env.LINKEDIN_EMAIL);
-    const { browser, page, sessionRestored, isAuthenticated } = result as { 
-      browser: any; 
-      page: any; 
+    const { browser, page, sessionRestored, isAuthenticated } = result as {
+      browser: any;
+      page: any;
       sessionRestored?: boolean;
       isAuthenticated?: boolean;
     };
     globalSessionId = SessionManager.createSession(browser, page);
     log.info(`✅ Browser initialized with session ID: ${globalSessionId}`);
-    
+
     // If session was restored and is valid, skip login
     if (sessionRestored && isAuthenticated) {
       log.info('✅ Using restored session - skipping login');
-      
+
       // Mark session as authenticated
       SessionManager.updateSession(globalSessionId, { isAuthenticated: true });
-      
+
       // Start message monitoring automatically
       try {
         await LinkedInService.startMessageMonitoring(globalSessionId);
@@ -180,18 +188,18 @@ async function autoInitialize() {
       }
       return;
     }
-    
+
     // Check if credentials are available
     const email = process.env.LINKEDIN_EMAIL;
     const password = process.env.LINKEDIN_PASSWORD;
-    
+
     if (!email || !password) {
       log.warn('⚠️  LinkedIn credentials not found in .env file');
       log.warn('   Please set LINKEDIN_EMAIL and LINKEDIN_PASSWORD');
       log.warn('   You can login manually using POST /api/auth/login\n');
       return;
     }
-    
+
     // Auto-login
     log.info('🔐 Attempting auto-login...');
     try {
@@ -229,7 +237,7 @@ app.listen(PORT, async () => {
   `);
   log.info('API Documentation available at: http://localhost:' + PORT);
   log.info('\nReady to accept requests!\n');
-  
+
   // Auto-initialize after server starts
   await autoInitialize();
 });
