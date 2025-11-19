@@ -185,8 +185,6 @@ class LinkedInService {
           '--disable-software-rasterizer',
           '--disable-extensions',
           '--no-first-run',
-          '--no-zygote',
-          '--single-process', // Required for some container environments
           // Prevent background tab throttling
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
