@@ -128,4 +128,4 @@ Only run these tests if you intend to perform the action!
 
 ## Documentation
 
-For complete API documentation, see [DOCUMENTATION.md](../DOCUMENTATION.md)
+For complete API documentation, see [FULL_DOCUMENTATION.md](../FULL_DOCUMENTATION.md)

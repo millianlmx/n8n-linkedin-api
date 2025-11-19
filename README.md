@@ -4,12 +4,7 @@ A powerful, containerized REST API for LinkedIn automation with TypeScript, Expr
 
 ## 📚 Documentation
 
-- **[API Reference](./DOCUMENTATION.md)** - Complete endpoint documentation
-- **[Custom Implementation](./CUSTOM_IMPLEMENTATION.md)** - Architecture & implementation details
-- **[Docker Deployment](./DOCKER_DEPLOYMENT.md)** - Container deployment guide
-- **[Browser State Persistence](./BROWSER_STATE_PERSISTENCE.md)** - Avoid re-login and CAPTCHAs with saved sessions
-- **[Conversation URL Endpoint](./CONVERSATION_URL_ENDPOINT.md)** - Detailed guide for the new conversation URL feature
-- **[Test Coverage](./FINAL_COVERAGE_REPORT.md)** - 80.95% test coverage report
+- **[Full Documentation](./FULL_DOCUMENTATION.md)** - Complete guide including API reference, deployment, architecture, and troubleshooting.
 
 ## Quick Start
 
@@ -128,7 +123,7 @@ Save browser state to avoid repeated logins and CAPTCHAs:
 - **First Login**: Saves all cookies, localStorage, and sessionStorage
 - **Subsequent Sessions**: Restores saved state automatically
 - **Benefits**: Skip login, avoid CAPTCHAs, faster initialization
-- **Details**: See [Browser State Persistence](./BROWSER_STATE_PERSISTENCE.md)
+- **Details**: See [Full Documentation](./FULL_DOCUMENTATION.md#browser-state-persistence)
 
 ## License
 
