@@ -71,8 +71,13 @@ export class BrowserStateService {
     try {
       log.debug('Saving browser state', { userIdentifier });
       
-      // Get all cookies from the browser
-      const cookies = await page.cookies();
+      // Get all cookies from the browser using browser context API
+      const browser = page.browser();
+      if (!browser) {
+        throw new Error('Browser instance not available');
+      }
+      const browserContext = browser.defaultBrowserContext();
+      const cookies = await browserContext.cookies();
       
       // Get localStorage and sessionStorage
       const storageData = await page.evaluate(() => {
@@ -161,16 +166,48 @@ export class BrowserStateService {
         await page.setUserAgent(user_agent);
       }
       
-      // Restore cookies
-      if (cookies && Array.isArray(cookies)) {
-        await page.setCookie(...cookies);
-      }
-      
-      // Navigate to LinkedIn first to set the correct domain for storage
+      // Navigate to LinkedIn first to set the correct domain for cookies and storage
       await page.goto('https://www.linkedin.com', { 
         waitUntil: 'domcontentloaded',
         timeout: 10000 
       });
+      
+      // Wait a bit for the page to load
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Get browser context for cookie operations
+      const browser = page.browser();
+      if (!browser) {
+        throw new Error('Browser instance not available');
+      }
+      const browserContext = browser.defaultBrowserContext();
+      
+      // Restore cookies AFTER navigating to LinkedIn domain
+      // This ensures cookies are set with the correct domain context
+      if (cookies && Array.isArray(cookies)) {
+        // Filter out any invalid cookies and ensure they have the correct domain
+        const validCookies = cookies.filter((cookie: any) => {
+          // Ensure cookie has required fields
+          return cookie.name && cookie.value && 
+                 (cookie.domain === '.linkedin.com' || 
+                  cookie.domain === 'linkedin.com' || 
+                  cookie.domain === '.www.linkedin.com' ||
+                  cookie.domain === 'www.linkedin.com');
+        });
+        
+        log.debug('Restoring cookies', { 
+          total: cookies.length, 
+          valid: validCookies.length 
+        });
+        
+        if (validCookies.length > 0) {
+          await browserContext.setCookie(...validCookies);
+          
+          // Verify cookies were set
+          const setCookies = await browserContext.cookies();
+          log.debug('Cookies set successfully', { count: setCookies.length });
+        }
+      }
       
       // Restore localStorage and sessionStorage
       await page.evaluate((storageData: { localStorage: Record<string, string>, sessionStorage: Record<string, string> }) => {
@@ -197,12 +234,26 @@ export class BrowserStateService {
         }
       }, { localStorage: local_storage || {}, sessionStorage: session_storage || {} });
       
+      // Reload the page to ensure cookies and storage are properly applied
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Verify cookies are still present after reload
+      const finalCookies = await browserContext.cookies();
+      
       log.info('Browser state restored', { 
         userIdentifier,
         cookieCount: cookies?.length || 0,
+        cookiesAfterRestore: finalCookies.length,
         localStorageItems: Object.keys(local_storage || {}).length,
         sessionStorageItems: Object.keys(session_storage || {}).length
       });
+      
+      if (finalCookies.length === 0 && cookies && cookies.length > 0) {
+        log.warn('Cookies were not properly restored', { userIdentifier });
+        return false;
+      }
+      
       return true;
     } catch (error) {
       log.error('Failed to restore browser state', error, { userIdentifier });

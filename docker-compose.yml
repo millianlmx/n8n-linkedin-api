@@ -102,7 +102,6 @@ services:
     restart: unless-stopped
     profiles:
       - monitoring
-      - development
       - production
     networks:
       - linkedin-network
@@ -127,7 +126,6 @@ services:
     restart: unless-stopped
     profiles:
       - monitoring
-      - development
       - production
     networks:
       - linkedin-network

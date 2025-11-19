@@ -6,7 +6,7 @@ import BrowserStateService from './BrowserStateService';
 import MetricsService from './MetricsService';
 import { SendMessageRequest, LoginRequest, ProfileScrapeRequest } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
-import * as MessagingDOMFunctions from '../utils/messaging-dom-functions';
+import { MessagingDOMFunctions } from '../utils/messaging-dom-functions';
 import { createServiceLogger } from '../utils/logger';
 
 import { existsSync } from 'fs';
@@ -85,6 +85,40 @@ class LinkedInService {
    */
   private async wait(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Ensure cookies are maintained across navigation
+   * This is especially important in containerized environments
+   * @param sessionId - Session identifier
+   * @private
+   */
+  private async ensureCookiesPersist(sessionId: string): Promise<void> {
+    try {
+      const session = SessionManager.getSession(sessionId);
+      if (!session) {
+        throw new Error('Session not found');
+      }
+
+      const { browser } = session;
+      const browserContext = browser.defaultBrowserContext();
+      
+      // Get current cookies using browser-level API
+      const cookies = await browserContext.cookies();
+      
+      if (cookies.length === 0) {
+        log.warn('No cookies found - session may have been lost');
+        return;
+      }
+      
+      // Re-set all cookies to ensure they persist
+      // This helps in containerized environments where cookies might not persist properly
+      await browserContext.setCookie(...cookies);
+      
+      log.debug('Cookies re-applied for persistence', { count: cookies.length });
+    } catch (error: any) {
+      log.warn('Failed to ensure cookie persistence', error);
+    }
   }
 
   /**
@@ -190,6 +224,10 @@ class LinkedInService {
           '--disable-backgrounding-occluded-windows',
           '--disable-renderer-backgrounding',
           '--disable-features=CalculateNativeWinOcclusion',
+          // Additional flags for better cookie/session persistence in containers
+          '--enable-features=NetworkService,NetworkServiceInProcess',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--disable-site-isolation-trials',
         ],
         defaultViewport: {
           width: 1366,
@@ -1062,11 +1100,52 @@ class LinkedInService {
 
       log.info('Scraping profile', { url: request.url });
 
+      // Get current cookies before navigation to ensure they're maintained
+      const browserContext = session.browser.defaultBrowserContext();
+      const cookies = await browserContext.cookies();
+      log.debug('Current cookies before navigation', { count: cookies.length });
+
+      // Ensure cookies persist before navigation (important for containers)
+      await this.ensureCookiesPersist(sessionId);
+
       // Navigate to profile with domcontentloaded (faster than networkidle2)
       await page.goto(request.url, {
         waitUntil: 'domcontentloaded',
         timeout: 10000, // Reduced from 60s to 10s
       });
+
+      // Wait a bit for page to load
+      await this.wait(2000);
+
+      // Check if we got redirected to login page (authentication lost)
+      const currentUrl = page.url();
+      if (currentUrl.includes('/login') || currentUrl.includes('/uas/login')) {
+        log.error('Redirected to login page - session expired', { currentUrl });
+        
+        // Mark session as not authenticated
+        SessionManager.updateSession(sessionId, {
+          isAuthenticated: false,
+        });
+        
+        throw new Error('Session expired. Please login again.');
+      }
+
+      // Check for login form in the page content
+      const hasLoginForm = await page.evaluate(() => {
+        return !!document.querySelector('form[data-id="sign-in-form"]') ||
+               !!document.querySelector('input[type="password"][name="session_password"]');
+      });
+
+      if (hasLoginForm) {
+        log.error('Login form detected on page - session expired');
+        
+        // Mark session as not authenticated
+        SessionManager.updateSession(sessionId, {
+          isAuthenticated: false,
+        });
+        
+        throw new Error('Session expired. Please login again.');
+      }
 
       // Wait for main content to appear - use Promise.race for faster fallback
       await Promise.race([
@@ -1078,7 +1157,7 @@ class LinkedInService {
         log.debug('Main content selector timeout, continuing');
       });
 
-      // Wait for content to render after scrolling
+      // Wait for content to render
       await this.wait(1000);
 
       log.debug('Page content loaded');
