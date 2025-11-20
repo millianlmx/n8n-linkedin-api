@@ -1,11 +1,13 @@
 FROM n8nio/n8n:next
 
-USER node
+USER root
 
 # Copy the patch script into the container
 COPY patch-loader.js /tmp/patch-loader.js
 
 # Run the patch
 RUN node /tmp/patch-loader.js
+
+USER node
 
 WORKDIR /home/node
