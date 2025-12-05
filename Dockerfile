@@ -62,6 +62,10 @@ RUN echo '#!/bin/bash\n\
 set -e\n\
 echo "🚀 Starting LinkedIn API container..."\n\
 \n\
+# Clean up any stale X lock files\n\
+echo "🧹 Cleaning up stale X lock files..."\n\
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99\n\
+\n\
 # Start Xvfb (virtual display) in background\n\
 echo "📺 Starting Xvfb virtual display..."\n\
 Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &\n\
