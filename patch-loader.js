@@ -119,3 +119,147 @@ try {
     console.error('License patch failed:', err);
     process.exit(1);
 }
+
+// Patch license.js to enable all features and inject entitlements
+try {
+    console.log('\nSearching for license.js...');
+    const licenseJsPath = execSync('find /usr/local/lib/node_modules/n8n -name license.js | grep -v license-state.js | head -1', { encoding: 'utf8' }).trim();
+    
+    if (!licenseJsPath) {
+        console.error('ERROR: license.js not found');
+        process.exit(1);
+    }
+    console.log('Found file at:', licenseJsPath);
+
+    // Read content
+    let licenseJsContent = fs.readFileSync(licenseJsPath, 'utf8');
+
+    // List of methods to patch in license.js - add "true ||" before the return statement
+    const licenseJsMethods = [
+        'isDynamicCredentialsEnabled',
+        'isSharingEnabled',
+        'isLogStreamingEnabled',
+        'isLdapEnabled',
+        'isSamlEnabled',
+        'isApiKeyScopesEnabled',
+        'isAiAssistantEnabled',
+        'isAskAiEnabled',
+        'isAiCreditsEnabled',
+        'isAdvancedExecutionFiltersEnabled',
+        'isAdvancedPermissionsLicensed',
+        'isDebugInEditorLicensed',
+        'isBinaryDataS3Licensed',
+        'isMultiMainLicensed',
+        'isVariablesEnabled',
+        'isSourceControlLicensed',
+        'isExternalSecretsEnabled',
+        'isWorkerViewLicensed',
+        'isProjectRoleAdminLicensed',
+        'isProjectRoleEditorLicensed',
+        'isProjectRoleViewerLicensed',
+        'isCustomNpmRegistryEnabled',
+        'isFoldersEnabled'
+    ];
+
+    let licenseJsPatchedCount = 0;
+    for (const method of licenseJsMethods) {
+        // Match pattern: methodName() {\n        return this.isLicensed(...);\n    }
+        const regex = new RegExp(`(${method}\\(\\)\\s*\\{\\s*return\\s+)(this\\.isLicensed\\([^)]+\\);)`, 'g');
+        const newContent = licenseJsContent.replace(regex, '$1true || $2');
+        if (newContent !== licenseJsContent) {
+            licenseJsContent = newContent;
+            licenseJsPatchedCount++;
+        }
+    }
+
+    // Patch getCurrentEntitlements to inject all features
+    const allFeatures = {
+        // Features
+        'feat:sharing': true,
+        'feat:ldap': true,
+        'feat:saml': true,
+        'feat:oidc': true,
+        'feat:mfaEnforcement': true,
+        'feat:logStreaming': true,
+        'feat:advancedExecutionFilters': true,
+        'feat:variables': true,
+        'feat:sourceControl': true,
+        'feat:externalSecrets': true,
+        'feat:debugInEditor': true,
+        'feat:binaryDataS3': true,
+        'feat:multipleMainInstances': true,
+        'feat:workerView': true,
+        'feat:advancedPermissions': true,
+        'feat:projectRole:admin': true,
+        'feat:projectRole:editor': true,
+        'feat:projectRole:viewer': true,
+        'feat:aiAssistant': true,
+        'feat:askAi': true,
+        'feat:communityNodes:customRegistry': true,
+        'feat:aiCredits': true,
+        'feat:folders': true,
+        'feat:insights:viewSummary': true,
+        'feat:insights:viewDashboard': true,
+        'feat:insights:viewHourlyData': true,
+        'feat:apiKeyScopes': true,
+        'feat:workflowDiffs': true,
+        'feat:customRoles': true,
+        'feat:aiBuilder': true,
+        'feat:dynamicCredentials': true,
+        'feat:workflowHistory': true,
+        'feat:workflowHistoryPrune': true,
+        // Quotas
+        'quota:activeWorkflows': -1,
+        'quota:maxVariables': -1,
+        'quota:users': -1,
+        'quota:workflowHistoryPrune': -1,
+        'quota:maxTeamProjects': -1,
+        'quota:insights:maxHistoryDays': 365,
+        'quota:insights:retention:maxAgeDays': 365,
+        'quota:insights:retention:pruneIntervalDays': 365,
+        'quota:evaluations:maxWorkflows': -1,
+        'planName': 'Enterprise'
+    };
+
+    const injectedFeatures = JSON.stringify(allFeatures);
+    
+    // Replace getCurrentEntitlements to merge injected features into the first entitlement
+    const entitlementsRegex = /(getCurrentEntitlements\(\)\s*\{)\s*(return\s+this\.manager\?\.getCurrentEntitlements\(\)\s*\?\?\s*\[\];)/;
+    if (entitlementsRegex.test(licenseJsContent)) {
+        const newGetCurrentEntitlements = `$1
+        const entitlements = this.manager?.getCurrentEntitlements() ?? [];
+        const injectedFeatures = ${injectedFeatures};
+        if (entitlements.length > 0) {
+           entitlements[0].features = { ...entitlements[0].features, ...injectedFeatures };
+        } else {
+            entitlements.push({ features: injectedFeatures });
+        }
+        return entitlements;`;
+        licenseJsContent = licenseJsContent.replace(entitlementsRegex, newGetCurrentEntitlements);
+        licenseJsPatchedCount++;
+        console.log('Patched getCurrentEntitlements to inject features into first entitlement');
+    }
+
+    // Patch isLicensed to always return true for any feature
+    const isLicensedRegex = /(isLicensed\(feature\)\s*\{\s*return\s+)(this\.manager\?\.hasFeatureEnabled\(feature\)\s*\?\?\s*false;)/;
+    if (isLicensedRegex.test(licenseJsContent)) {
+        licenseJsContent = licenseJsContent.replace(
+            isLicensedRegex,
+            '$1true || $2'
+        );
+        licenseJsPatchedCount++;
+        console.log('Patched isLicensed method');
+    }
+
+    if (licenseJsPatchedCount === 0) {
+        console.error('ERROR: Could not patch any methods in license.js.');
+        process.exit(1);
+    }
+
+    fs.writeFileSync(licenseJsPath, licenseJsContent);
+    console.log(`Successfully patched license.js (${licenseJsPatchedCount} patches applied)`);
+
+} catch (err) {
+    console.error('License.js patch failed:', err);
+    process.exit(1);
+}
