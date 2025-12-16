@@ -241,11 +241,11 @@ try {
     }
 
     // Patch isLicensed to always return true for any feature
-    const isLicensedRegex = /(isLicensed\(feature\)\s*\{\s*return\s+)(this\.manager\?\.hasFeatureEnabled\(feature\)\s*\?\?\s*false;)/;
+    const isLicensedRegex = /(isLicensed\(feature\)\s*\{\s*return\s+)(this\.manager\?\.hasFeatureEnabled\(feature\)\s*\?\?\s*false)(;)/;
     if (isLicensedRegex.test(licenseJsContent)) {
         licenseJsContent = licenseJsContent.replace(
             isLicensedRegex,
-            '$1true || $2'
+            '$1true || ($2)$3'
         );
         licenseJsPatchedCount++;
         console.log('Patched isLicensed method');
