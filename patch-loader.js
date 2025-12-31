@@ -186,6 +186,8 @@ try {
         'feat:sourceControl': true,
         'feat:externalSecrets': true,
         'feat:debugInEditor': true,
+        'feat:showNonProdBanner': false,
+        'feat:apiDisabled': false,
         'feat:binaryDataS3': true,
         'feat:multipleMainInstances': true,
         'feat:workerView': true,
