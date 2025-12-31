@@ -112,6 +112,14 @@ try {
         process.exit(1);
     }
 
+    // Patch isAPIDisabled to always return false (API should be enabled)
+    const isAPIDisabledRegex = /(isAPIDisabled\(\)\s*\{\s*return\s+)(this\.isLicensed\([^)]+\);)/;
+    if (isAPIDisabledRegex.test(licenseContent)) {
+        licenseContent = licenseContent.replace(isAPIDisabledRegex, '$1false && $2');
+        patchedCount++;
+        console.log('Patched isAPIDisabled to return false');
+    }
+
     fs.writeFileSync(licenseFilePath, licenseContent);
     console.log(`Successfully patched license-state.js (${patchedCount} methods patched)`);
 
@@ -138,8 +146,6 @@ try {
     const licenseJsMethods = [
         'isDynamicCredentialsEnabled',
         'isSharingEnabled',
-        'isLogStreamingEnabled',
-        'isLdapEnabled',
         'isSamlEnabled',
         'isApiKeyScopesEnabled',
         'isAiAssistantEnabled',
@@ -149,7 +155,6 @@ try {
         'isAdvancedPermissionsLicensed',
         'isDebugInEditorLicensed',
         'isBinaryDataS3Licensed',
-        'isMultiMainLicensed',
         'isVariablesEnabled',
         'isSourceControlLicensed',
         'isExternalSecretsEnabled',
@@ -176,20 +181,20 @@ try {
     const allFeatures = {
         // Features
         'feat:sharing': true,
-        'feat:ldap': true,
+        'feat:ldap': false,
         'feat:saml': true,
         'feat:oidc': true,
         'feat:mfaEnforcement': true,
-        'feat:logStreaming': true,
+        'feat:logStreaming': false,
         'feat:advancedExecutionFilters': true,
         'feat:variables': true,
         'feat:sourceControl': true,
         'feat:externalSecrets': true,
         'feat:debugInEditor': true,
-        'feat:showNonProdBanner': false,
-        'feat:apiDisabled': false,
+        'feat:showNonProdBanner': true,
+        'feat:apiDisabled': true,
         'feat:binaryDataS3': true,
-        'feat:multipleMainInstances': true,
+        'feat:multipleMainInstances': false,
         'feat:workerView': true,
         'feat:advancedPermissions': true,
         'feat:projectRole:admin': true,
@@ -220,7 +225,7 @@ try {
         'quota:insights:retention:maxAgeDays': 365,
         'quota:insights:retention:pruneIntervalDays': 365,
         'quota:evaluations:maxWorkflows': -1,
-        'planName': 'Enterprise'
+        'planName': 'Community'
     };
 
     const injectedFeatures = JSON.stringify(allFeatures);
