@@ -191,8 +191,8 @@ try {
         'feat:sourceControl': true,
         'feat:externalSecrets': true,
         'feat:debugInEditor': true,
-        'feat:showNonProdBanner': true,
-        'feat:apiDisabled': true,
+        'feat:showNonProdBanner': false,
+        'feat:apiDisabled': false,
         'feat:binaryDataS3': true,
         'feat:multipleMainInstances': false,
         'feat:workerView': true,
@@ -268,5 +268,50 @@ try {
 
 } catch (err) {
     console.error('License.js patch failed:', err);
+    process.exit(1);
+}
+
+// Patch frontend.service.js to force enable public API and Swagger UI
+try {
+    console.log('\nSearching for frontend.service.js...');
+    const frontendServicePath = execSync('find /usr/local/lib/node_modules/n8n -name frontend.service.js', { encoding: 'utf8' }).trim();
+    
+    if (!frontendServicePath) {
+        console.error('ERROR: frontend.service.js not found');
+        process.exit(1);
+    }
+    console.log('Found file at:', frontendServicePath);
+
+    // Read content
+    let frontendContent = fs.readFileSync(frontendServicePath, 'utf8');
+    let frontendPatchedCount = 0;
+
+    // Patch publicApi.enabled to always be true
+    // Original: enabled: (0, public_api_1.isApiEnabled)(),
+    const publicApiEnabledRegex = /(publicApi:\s*\{\s*enabled:\s*)\(0,\s*public_api_1\.isApiEnabled\)\(\)/;
+    if (publicApiEnabledRegex.test(frontendContent)) {
+        frontendContent = frontendContent.replace(publicApiEnabledRegex, '$1true');
+        frontendPatchedCount++;
+        console.log('Patched publicApi.enabled to always be true');
+    }
+
+    // Patch swaggerUi.enabled to always be true
+    // Original: enabled: !this.globalConfig.publicApi.swaggerUiDisabled,
+    const swaggerUiEnabledRegex = /(swaggerUi:\s*\{\s*enabled:\s*)!this\.globalConfig\.publicApi\.swaggerUiDisabled/;
+    if (swaggerUiEnabledRegex.test(frontendContent)) {
+        frontendContent = frontendContent.replace(swaggerUiEnabledRegex, '$1true');
+        frontendPatchedCount++;
+        console.log('Patched swaggerUi.enabled to always be true');
+    }
+
+    if (frontendPatchedCount === 0) {
+        console.warn('WARNING: Could not patch any settings in frontend.service.js. API settings may not be affected.');
+    } else {
+        fs.writeFileSync(frontendServicePath, frontendContent);
+        console.log(`Successfully patched frontend.service.js (${frontendPatchedCount} patches applied)`);
+    }
+
+} catch (err) {
+    console.error('Frontend service patch failed:', err);
     process.exit(1);
 }
