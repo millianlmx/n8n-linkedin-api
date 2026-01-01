@@ -304,6 +304,15 @@ try {
         console.log('Patched swaggerUi.enabled to always be true');
     }
 
+    // Patch SHOW_NON_PROD_BANNER to always be false
+    // Original: showNonProdBanner: this.license.isLicensed(constants_1.LICENSE_FEATURES.SHOW_NON_PROD_BANNER),
+    const showNonProdBannerRegex = /this\.license\.isLicensed\(constants_1\.LICENSE_FEATURES\.SHOW_NON_PROD_BANNER\)/g;
+    if (showNonProdBannerRegex.test(frontendContent)) {
+        frontendContent = frontendContent.replace(showNonProdBannerRegex, 'false');
+        frontendPatchedCount++;
+        console.log('Patched SHOW_NON_PROD_BANNER to always be false');
+    }
+
     if (frontendPatchedCount === 0) {
         console.warn('WARNING: Could not patch any settings in frontend.service.js. API settings may not be affected.');
     } else {
