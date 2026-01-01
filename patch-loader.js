@@ -315,3 +315,48 @@ try {
     console.error('Frontend service patch failed:', err);
     process.exit(1);
 }
+
+// Patch public-api/index.js to force isApiEnabled to return true
+try {
+    console.log('\nSearching for public-api/index.js...');
+    const publicApiIndexPath = execSync('find /usr/local/lib/node_modules/n8n -path "*/public-api/index.js" | head -1', { encoding: 'utf8' }).trim();
+    
+    if (!publicApiIndexPath) {
+        console.error('ERROR: public-api/index.js not found');
+        process.exit(1);
+    }
+    console.log('Found file at:', publicApiIndexPath);
+
+    // Read content
+    let publicApiContent = fs.readFileSync(publicApiIndexPath, 'utf8');
+    let publicApiPatchedCount = 0;
+
+    // Patch isApiEnabled function to always return true
+    // Original: function isApiEnabled() { return !di_1.Container.get(config_1.GlobalConfig).publicApi.disabled && !di_1.Container.get(license_1.License).isAPIDisabled(); }
+    const isApiEnabledRegex = /(function isApiEnabled\(\)\s*\{\s*return\s*)![^}]+(\})/;
+    if (isApiEnabledRegex.test(publicApiContent)) {
+        publicApiContent = publicApiContent.replace(isApiEnabledRegex, '$1true;$2');
+        publicApiPatchedCount++;
+        console.log('Patched isApiEnabled to always return true');
+    }
+
+    // Also patch the swaggerUiDisabled check in createApiRouter
+    // Original: if (!di_1.Container.get(config_1.GlobalConfig).publicApi.swaggerUiDisabled) {
+    const swaggerDisabledRegex = /if\s*\(\s*!di_1\.Container\.get\(config_1\.GlobalConfig\)\.publicApi\.swaggerUiDisabled\s*\)/;
+    if (swaggerDisabledRegex.test(publicApiContent)) {
+        publicApiContent = publicApiContent.replace(swaggerDisabledRegex, 'if (true)');
+        publicApiPatchedCount++;
+        console.log('Patched swaggerUiDisabled check to always be true');
+    }
+
+    if (publicApiPatchedCount === 0) {
+        console.warn('WARNING: Could not patch any settings in public-api/index.js.');
+    } else {
+        fs.writeFileSync(publicApiIndexPath, publicApiContent);
+        console.log(`Successfully patched public-api/index.js (${publicApiPatchedCount} patches applied)`);
+    }
+
+} catch (err) {
+    console.error('Public API index patch failed:', err);
+    process.exit(1);
+}
