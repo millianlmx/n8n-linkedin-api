@@ -43,6 +43,14 @@ router.post('/scrape', async (req: Request, res: Response) => {
 
   try {
     const { sessionId, url } = req.body;
+    
+    // Log the EXACT sessionId received (full value, not truncated)
+    log.debug('Received sessionId details', {
+      requestId,
+      sessionIdRaw: sessionId,
+      sessionIdLength: sessionId?.length,
+      sessionIdType: typeof sessionId,
+    });
 
     // Validate sessionId
     if (!sessionId) {
