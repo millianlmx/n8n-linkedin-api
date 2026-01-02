@@ -304,8 +304,8 @@ describe('LinkedIn DOM Functions', () => {
       const result = DOMFunctions.extractConversationMessages();
       
       expect(result).toHaveLength(1);
-      // Should contain a formatted date like "4 nov."
-      expect(result[0].timestamp).toMatch(/\d+ \w+\. 09:00/);
+      // Should contain a formatted date like "4 nov." or "29 déc."
+      expect(result[0].timestamp).toMatch(/\d+ .+\. 09:00/);
       expect(result[0].message).toBe('Monday message');
     });
 
@@ -326,8 +326,8 @@ describe('LinkedIn DOM Functions', () => {
       const result = DOMFunctions.extractConversationMessages();
       
       expect(result).toHaveLength(1);
-      // Should contain a formatted date
-      expect(result[0].timestamp).toMatch(/\d+ \w+\. 14:30/);
+      // Should contain a formatted date like "31 déc." or "31 Dec."
+      expect(result[0].timestamp).toMatch(/\d+ .+\. 14:30/);
       expect(result[0].message).toBe('Midweek message');
     });
 
