@@ -1,11 +1,70 @@
+// Mock dependencies BEFORE imports to prevent @2captcha/captcha-solver import errors
+jest.mock('puppeteer', () => ({
+  launch: jest.fn(),
+}));
+jest.mock('puppeteer-extra', () => ({
+  use: jest.fn(),
+  launch: jest.fn(),
+}));
+jest.mock('puppeteer-extra-plugin-stealth', () => jest.fn());
+jest.mock('@2captcha/captcha-solver', () => ({
+  Solver: jest.fn().mockImplementation(() => ({
+    recaptcha: jest.fn(),
+    hcaptcha: jest.fn(),
+  })),
+}));
+jest.mock('../../src/services/CaptchaService', () => ({
+  default: {
+    solveCaptcha: jest.fn(),
+  },
+}));
+
+// Mock service modules with factory functions to ensure proper mock injection
+const mockLinkedInBrowser = {
+  isReady: jest.fn(),
+  isAuthenticated: jest.fn(),
+  getOperationPage: jest.fn(),
+  getMonitoringPage: jest.fn(),
+  getBrowser: jest.fn(),
+  setAuthenticated: jest.fn(),
+  setUserIdentifier: jest.fn(),
+  initialize: jest.fn(),
+  saveState: jest.fn(),
+  getOrCreateMonitoringPage: jest.fn(),
+  focusOperationPage: jest.fn(),
+  focusMonitoringPage: jest.fn(),
+  getLinkedInCookies: jest.fn(),
+  closeMonitoringPage: jest.fn(),
+  getStatus: jest.fn(),
+  close: jest.fn(),
+  clearBrowserState: jest.fn(),
+};
+
+const mockBrowserStateService = {
+  hasBrowserState: jest.fn(),
+  restoreBrowserState: jest.fn(),
+  saveBrowserState: jest.fn(),
+  verifySession: jest.fn(),
+  deleteBrowserState: jest.fn(),
+};
+
+jest.mock('../../src/services/LinkedInService');
+jest.mock('../../src/services/SessionManager');
+jest.mock('../../src/services/LinkedInBrowser', () => ({
+  default: mockLinkedInBrowser,
+  __esModule: true,
+}));
+jest.mock('../../src/services/BrowserStateService', () => ({
+  default: mockBrowserStateService,
+  __esModule: true,
+}));
+jest.mock('../../src/services/CacheService');
+
 import express from 'express';
 import request from 'supertest';
 import authRouter from '../../src/routes/auth.routes';
 import LinkedInService from '../../src/services/LinkedInService';
 import SessionManager from '../../src/services/SessionManager';
-
-jest.mock('../../src/services/LinkedInService');
-jest.mock('../../src/services/SessionManager');
 
 const app = express();
 app.use(express.json());
@@ -13,22 +72,126 @@ app.use('/api/auth', authRouter);
 
 const mockedLinkedInService = LinkedInService as jest.Mocked<typeof LinkedInService>;
 const mockedSessionManager = SessionManager as jest.Mocked<typeof SessionManager>;
+// Use the module-level mock objects directly
+const mockedLinkedInBrowser = mockLinkedInBrowser as {
+  isReady: jest.Mock;
+  isAuthenticated: jest.Mock;
+  getOperationPage: jest.Mock;
+  getMonitoringPage: jest.Mock;
+  getBrowser: jest.Mock;
+  setAuthenticated: jest.Mock;
+  setUserIdentifier: jest.Mock;
+  initialize: jest.Mock;
+  saveState: jest.Mock;
+  getOrCreateMonitoringPage: jest.Mock;
+  focusOperationPage: jest.Mock;
+  focusMonitoringPage: jest.Mock;
+  getLinkedInCookies: jest.Mock;
+  closeMonitoringPage: jest.Mock;
+  getStatus: jest.Mock;
+  close: jest.Mock;
+  clearBrowserState: jest.Mock;
+};
+const mockedBrowserStateService = mockBrowserStateService as {
+  hasBrowserState: jest.Mock;
+  restoreBrowserState: jest.Mock;
+  saveBrowserState: jest.Mock;
+  verifySession: jest.Mock;
+  deleteBrowserState: jest.Mock;
+};
 
 describe('Authentication API', () => {
   beforeEach(() => {
-    // Clean up mocks between tests
     jest.clearAllMocks();
+    
+    // Default mock setup for LinkedInBrowser
+    mockedLinkedInBrowser.isReady.mockReturnValue(true);
+    mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
+    mockedLinkedInBrowser.getStatus.mockReturnValue({
+      ready: true,
+      authenticated: false,
+      hasMonitoring: false,
+      userIdentifier: null,
+    });
   });
 
-  describe('POST /api/auth/init', () => {
+  describe('POST /api/auth/initialize (new endpoint)', () => {
+    it('should initialize browser successfully without saved session', async () => {
+      // Setup
+      mockedLinkedInService.initializeBrowser.mockResolvedValue({
+        browser: {} as any,
+        page: {} as any,
+        sessionRestored: false,
+        isAuthenticated: false,
+      });
+
+      // Execution
+      const response = await request(app).post('/api/auth/initialize');
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        sessionRestored: false,
+        isAuthenticated: false,
+        message: 'Browser initialized',
+      });
+      expect(mockedLinkedInService.initializeBrowser).toHaveBeenCalledTimes(1);
+    });
+
+    it('should initialize browser with restored session', async () => {
+      // Setup
+      mockedLinkedInService.initializeBrowser.mockResolvedValue({
+        browser: {} as any,
+        page: {} as any,
+        sessionRestored: true,
+        isAuthenticated: true,
+      });
+      mockedLinkedInService.startMessageMonitoring.mockResolvedValue({ success: true } as any);
+
+      // Execution
+      const response = await request(app)
+        .post('/api/auth/initialize')
+        .send({ email: 'test@example.com' });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        sessionRestored: true,
+        isAuthenticated: true,
+        message: 'Browser initialized with saved session',
+      });
+      expect(mockedLinkedInService.initializeBrowser).toHaveBeenCalledWith('test@example.com');
+    });
+
+    it('should return 500 error if browser initialization fails', async () => {
+      // Setup
+      mockedLinkedInService.initializeBrowser.mockRejectedValue(new Error('Failed to launch browser'));
+
+      // Execution
+      const response = await request(app).post('/api/auth/initialize');
+
+      // Assertion
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Failed to launch browser',
+      });
+    });
+  });
+
+  describe('POST /api/auth/init (legacy endpoint)', () => {
     it('should initialize a browser session and return a session ID', async () => {
       // Setup
       const mockBrowser = { close: jest.fn() } as any;
       const mockPage = { goto: jest.fn(), url: jest.fn() } as any;
-      mockedLinkedInService.initializeBrowser.mockResolvedValue({ 
-        browser: mockBrowser, 
-        page: mockPage 
-      } as any);
+      mockedLinkedInService.initializeBrowser.mockResolvedValue({
+        browser: mockBrowser,
+        page: mockPage,
+        sessionRestored: false,
+        isAuthenticated: false,
+      });
       mockedSessionManager.createSession.mockReturnValue('session123');
 
       // Execution
@@ -36,10 +199,11 @@ describe('Authentication API', () => {
 
       // Assertion
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ 
-        success: true, 
-        sessionId: 'session123', 
-        message: 'Browser initialized' 
+      expect(response.body).toMatchObject({
+        success: true,
+        sessionId: 'session123',
+        sessionRestored: false,
+        message: 'Browser initialized',
       });
       expect(mockedLinkedInService.initializeBrowser).toHaveBeenCalledTimes(1);
       expect(mockedSessionManager.createSession).toHaveBeenCalledWith(mockBrowser, mockPage);
@@ -55,132 +219,190 @@ describe('Authentication API', () => {
 
       // Assertion
       expect(response.status).toBe(500);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: errorMessage 
+      expect(response.body).toEqual({
+        success: false,
+        message: errorMessage,
+      });
+    });
+  });
+
+  describe('GET /api/auth/status (new endpoint)', () => {
+    it('should return browser status when ready and authenticated', async () => {
+      // Setup
+      mockedLinkedInBrowser.getStatus.mockReturnValue({
+        ready: true,
+        authenticated: true,
+        hasMonitoring: true,
+        userIdentifier: 'test@example.com',
+      });
+
+      // Execution
+      const response = await request(app).get('/api/auth/status');
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        ready: true,
+        authenticated: true,
+        hasMonitoring: true,
+        userIdentifier: 'test@example.com',
       });
     });
 
-    it('should handle unexpected errors during initialization', async () => {
+    it('should return browser status when not ready', async () => {
       // Setup
-      mockedLinkedInService.initializeBrowser.mockRejectedValue(new Error('Unexpected error'));
+      mockedLinkedInBrowser.getStatus.mockReturnValue({
+        ready: false,
+        authenticated: false,
+        hasMonitoring: false,
+        userIdentifier: null,
+      });
 
       // Execution
-      const response = await request(app).post('/api/auth/init');
+      const response = await request(app).get('/api/auth/status');
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        ready: false,
+        authenticated: false,
+      });
+    });
+
+    it('should handle errors when getting status', async () => {
+      // Setup
+      mockedLinkedInBrowser.getStatus.mockImplementation(() => {
+        throw new Error('Status error');
+      });
+
+      // Execution
+      const response = await request(app).get('/api/auth/status');
 
       // Assertion
       expect(response.status).toBe(500);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body).toHaveProperty('message');
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Status error',
+      });
     });
   });
 
   describe('POST /api/auth/login', () => {
-    it('should log in successfully with valid credentials', async () => {
+    it('should return 503 when browser not initialized (new system)', async () => {
       // Setup
-      const credentials = { 
-        sessionId: 'session123', 
-        email: 'test@example.com', 
-        password: 'password' 
-      };
-      mockedLinkedInService.login.mockResolvedValue({ success: true, message: '', redirectUrl: '' } as any);
-      mockedSessionManager.getSession.mockReturnValue({} as any);
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
 
       // Execution
       const response = await request(app)
         .post('/api/auth/login')
-        .send(credentials);
+        .send({ email: 'test@example.com', password: 'password' });
+
+      // Assertion
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({
+        success: false,
+        message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+      });
+    });
+
+    it('should return success when already authenticated (new system)', async () => {
+      // Setup
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
+
+      // Execution
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'test@example.com', password: 'password' });
 
       // Assertion
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ 
-        success: true, 
-        sessionId: 'session123', 
-        message: 'Login successful' 
+      expect(response.body).toMatchObject({
+        success: true,
+        sessionRestored: true,
+        message: 'Already logged in',
       });
     });
 
-    it('should return a 400 error when sessionId is missing', async () => {
+    it('should restore session from cookies when available (new system)', async () => {
       // Setup
-      const invalidRequest = { 
-        email: 'test@example.com', 
-        password: 'password' 
-      };
+      const mockPage = { goto: jest.fn(), url: jest.fn() };
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
+      mockedLinkedInBrowser.getOperationPage.mockReturnValue(mockPage as any);
+      mockedBrowserStateService.hasBrowserState.mockResolvedValue(true);
+      mockedBrowserStateService.restoreBrowserState.mockResolvedValue(true);
+      mockedBrowserStateService.verifySession.mockResolvedValue(true);
+      mockedLinkedInService.startMessageMonitoring.mockResolvedValue({ success: true } as any);
 
       // Execution
       const response = await request(app)
         .post('/api/auth/login')
-        .send(invalidRequest);
+        .send({ email: 'test@example.com', password: 'password' });
 
       // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Session ID is required' 
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        sessionRestored: true,
+        message: 'Login successful (session restored from cookies)',
       });
+      expect(mockedLinkedInBrowser.setAuthenticated).toHaveBeenCalledWith(true);
     });
 
-    it('should return a 401 error for invalid credentials', async () => {
+    it('should perform real login when no saved session (new system)', async () => {
       // Setup
-      const invalidCredentials = { 
-        sessionId: 'session123', 
-        email: 'wrong@example.com', 
-        password: 'wrong' 
-      };
+      const mockPage = { goto: jest.fn(), url: jest.fn() };
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
+      mockedLinkedInBrowser.getOperationPage.mockReturnValue(mockPage as any);
+      mockedBrowserStateService.hasBrowserState.mockResolvedValue(false);
+      mockedLinkedInService.login.mockResolvedValue({ success: true, message: 'Login successful' } as any);
+
+      // Execution
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'test@example.com', password: 'password' });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        sessionRestored: false,
+        message: 'Login successful',
+      });
+      expect(mockedLinkedInService.login).toHaveBeenCalled();
+    });
+
+    it('should return 401 for login failure', async () => {
+      // Setup
+      const mockPage = { goto: jest.fn(), url: jest.fn() };
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
+      mockedLinkedInBrowser.getOperationPage.mockReturnValue(mockPage as any);
+      mockedBrowserStateService.hasBrowserState.mockResolvedValue(false);
       mockedLinkedInService.login.mockRejectedValue(new Error('Invalid credentials'));
-      mockedSessionManager.getSession.mockReturnValue({} as any);
 
       // Execution
       const response = await request(app)
         .post('/api/auth/login')
-        .send(invalidCredentials);
+        .send({ email: 'wrong@example.com', password: 'wrong' });
 
       // Assertion
       expect(response.status).toBe(401);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Invalid credentials' 
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Invalid credentials',
       });
-    });
-
-    it('should handle login timeout errors', async () => {
-      // Setup
-      mockedLinkedInService.login.mockRejectedValue(new Error('Login timeout'));
-      mockedSessionManager.getSession.mockReturnValue({} as any);
-
-      // Execution
-      const response = await request(app)
-        .post('/api/auth/login')
-        .send({ sessionId: 'session123', email: 'test@example.com', password: 'password' });
-
-      // Assertion
-      expect(response.status).toBe(401);
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body.message).toContain('timeout');
     });
   });
 
   describe('DELETE /api/auth/logout', () => {
-    it('should log out successfully', async () => {
+    it('should close browser and log out successfully (new system)', async () => {
       // Setup
-      mockedSessionManager.deleteSession.mockResolvedValue(undefined);
-
-      // Execution
-      const response = await request(app)
-        .delete('/api/auth/logout')
-        .send({ sessionId: 'session123' });
-
-      // Assertion
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ 
-        success: true, 
-        message: 'Logged out successfully' 
-      });
-      expect(mockedSessionManager.deleteSession).toHaveBeenCalledWith('session123');
-    });
-
-    it('should return a 400 error when sessionId is missing', async () => {
-      // Setup - no sessionId provided
+      mockedLinkedInBrowser.close.mockResolvedValue(undefined);
 
       // Execution
       const response = await request(app)
@@ -188,73 +410,84 @@ describe('Authentication API', () => {
         .send({});
 
       // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Session ID is required' 
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        success: true,
+        message: 'Logged out successfully',
       });
+      expect(mockedLinkedInBrowser.close).toHaveBeenCalled();
     });
 
-    it('should handle errors when deleting session', async () => {
+    it('should handle errors when closing browser', async () => {
       // Setup
-      mockedSessionManager.deleteSession.mockRejectedValue(new Error('Session not found'));
+      mockedLinkedInBrowser.close.mockRejectedValue(new Error('Close failed'));
 
       // Execution
       const response = await request(app)
         .delete('/api/auth/logout')
-        .send({ sessionId: 'invalid-session' });
+        .send({});
 
       // Assertion
       expect(response.status).toBe(500);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Session not found' 
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Close failed',
       });
     });
   });
 
   describe('GET /api/auth/sessions', () => {
-    it('should list all active sessions', async () => {
+    it('should return singleton session when browser is ready (new system)', async () => {
       // Setup
-      const sessions = [
-        { id: 'session1', isAuthenticated: true, createdAt: new Date() },
-        { id: 'session2', isAuthenticated: false, createdAt: new Date() }
-      ];
-      mockedSessionManager.getAllSessions.mockReturnValue(sessions as any);
+      mockedLinkedInBrowser.getStatus.mockReturnValue({
+        ready: true,
+        authenticated: true,
+        hasMonitoring: true,
+        userIdentifier: 'test@example.com',
+      });
 
       // Execution
       const response = await request(app).get('/api/auth/sessions');
 
       // Assertion
       expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({ 
-        success: true, 
-        count: 2 
+      expect(response.body).toMatchObject({
+        success: true,
+        count: 1,
       });
-      expect(response.body.sessions).toHaveLength(2);
-      expect(response.body.sessions[0]).toMatchObject({ id: 'session1', isAuthenticated: true });
-      expect(response.body.sessions[1]).toMatchObject({ id: 'session2', isAuthenticated: false });
+      expect(response.body.sessions).toHaveLength(1);
+      expect(response.body.sessions[0]).toMatchObject({
+        id: 'singleton',
+        isAuthenticated: true,
+        hasMonitoring: true,
+        userIdentifier: 'test@example.com',
+      });
     });
 
-    it('should return empty array when no sessions exist', async () => {
+    it('should return empty array when browser is not ready (new system)', async () => {
       // Setup
-      mockedSessionManager.getAllSessions.mockReturnValue([]);
+      mockedLinkedInBrowser.getStatus.mockReturnValue({
+        ready: false,
+        authenticated: false,
+        hasMonitoring: false,
+        userIdentifier: null,
+      });
 
       // Execution
       const response = await request(app).get('/api/auth/sessions');
 
       // Assertion
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ 
-        success: true, 
-        sessions: [], 
-        count: 0 
+      expect(response.body).toEqual({
+        success: true,
+        sessions: [],
+        count: 0,
       });
     });
 
     it('should handle errors when retrieving sessions', async () => {
       // Setup
-      mockedSessionManager.getAllSessions.mockImplementation(() => {
+      mockedLinkedInBrowser.getStatus.mockImplementation(() => {
         throw new Error('Database error');
       });
 
@@ -263,41 +496,40 @@ describe('Authentication API', () => {
 
       // Assertion
       expect(response.status).toBe(500);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Database error' 
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Database error',
       });
     });
   });
 
   describe('GET /api/auth/session/:sessionId', () => {
-    it('should return session details for a valid session ID', async () => {
+    it('should return singleton session details (new system)', async () => {
       // Setup
-      const session = {
-        id: 'session123',
-        isAuthenticated: true,
-        createdAt: new Date(),
-        lastUsed: new Date(),
-        page: { url: () => 'https://www.linkedin.com/feed' },
-      };
-      mockedSessionManager.getSession.mockReturnValue(session as any);
+      mockedLinkedInBrowser.getStatus.mockReturnValue({
+        ready: true,
+        authenticated: true,
+        hasMonitoring: true,
+        userIdentifier: 'test@example.com',
+      });
 
       // Execution
-      const response = await request(app).get('/api/auth/session/session123');
+      const response = await request(app).get('/api/auth/session/singleton');
 
       // Assertion
       expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('success', true);
-      expect(response.body.session).toMatchObject({
-        id: 'session123',
-        isAuthenticated: true,
-        currentUrl: 'https://www.linkedin.com/feed'
+      expect(response.body).toMatchObject({
+        success: true,
+        session: {
+          id: 'singleton',
+          isAuthenticated: true,
+          hasMonitoring: true,
+          userIdentifier: 'test@example.com',
+        },
       });
-      expect(response.body.session).toHaveProperty('createdAt');
-      expect(response.body.session).toHaveProperty('lastUsed');
     });
 
-    it('should return a 404 error for non-existent session', async () => {
+    it('should return 404 for non-existent legacy session', async () => {
       // Setup
       mockedSessionManager.getSession.mockReturnValue(undefined);
 
@@ -306,9 +538,9 @@ describe('Authentication API', () => {
 
       // Assertion
       expect(response.status).toBe(404);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Session not found' 
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Session not found',
       });
     });
 
@@ -323,47 +555,58 @@ describe('Authentication API', () => {
 
       // Assertion
       expect(response.status).toBe(500);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Internal error' 
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Internal error',
       });
     });
   });
 
   describe('POST /api/auth/force-authenticate', () => {
-    it('should force authenticate a valid session', async () => {
+    it('should force authenticate when browser is ready and not on login page (new system)', async () => {
       // Setup
-      const session = {
-        id: 'session123',
-        isAuthenticated: false,
-        page: { url: () => 'https://www.linkedin.com/feed' },
-      };
-      mockedSessionManager.getSession.mockReturnValue(session as any);
-      mockedSessionManager.updateSession.mockReturnValue(undefined);
+      const mockPage = { url: jest.fn().mockReturnValue('https://www.linkedin.com/feed') };
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.getOperationPage.mockReturnValue(mockPage as any);
+      mockedLinkedInService.startMessageMonitoring.mockResolvedValue({ success: true } as any);
 
       // Execution
       const response = await request(app)
         .post('/api/auth/force-authenticate')
-        .send({ sessionId: 'session123' });
+        .send({});
 
       // Assertion
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({
         success: true,
         message: 'Session marked as authenticated',
-        session: {
-          id: 'session123',
-          isAuthenticated: true,
-          currentUrl: 'https://www.linkedin.com/feed'
-        }
+        currentUrl: 'https://www.linkedin.com/feed',
       });
-      expect(mockedSessionManager.updateSession).toHaveBeenCalledWith('session123', {
-        isAuthenticated: true
+      expect(mockedLinkedInBrowser.setAuthenticated).toHaveBeenCalledWith(true);
+    });
+
+    it('should return 503 when browser is not ready (new system)', async () => {
+      // Setup
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
+
+      // Execution
+      const response = await request(app)
+        .post('/api/auth/force-authenticate')
+        .send({});
+
+      // Assertion
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({
+        success: false,
+        message: 'Browser not initialized',
       });
     });
 
-    it('should return a 400 error when sessionId is missing', async () => {
-      // Setup - no sessionId provided
+    it('should return 400 when still on login page (new system)', async () => {
+      // Setup
+      const mockPage = { url: jest.fn().mockReturnValue('https://www.linkedin.com/login') };
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.getOperationPage.mockReturnValue(mockPage as any);
 
       // Execution
       const response = await request(app)
@@ -372,69 +615,29 @@ describe('Authentication API', () => {
 
       // Assertion
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Session ID is required' 
-      });
-    });
-
-    it('should return a 404 error for non-existent session', async () => {
-      // Setup
-      mockedSessionManager.getSession.mockReturnValue(undefined);
-
-      // Execution
-      const response = await request(app)
-        .post('/api/auth/force-authenticate')
-        .send({ sessionId: 'invalid-session' });
-
-      // Assertion
-      expect(response.status).toBe(404);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Session not found' 
-      });
-    });
-
-    it('should return a 400 error when still on login page', async () => {
-      // Setup
-      const mockUrl = jest.fn().mockReturnValue('https://www.linkedin.com/login');
-      const session = {
-        id: 'session123',
-        isAuthenticated: false,
-        page: { url: mockUrl },
-      };
-      mockedSessionManager.getSession.mockReturnValue(session as any);
-
-      // Execution
-      const response = await request(app)
-        .post('/api/auth/force-authenticate')
-        .send({ sessionId: 'session123' });
-
-      // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toMatchObject({ 
-        success: false, 
+      expect(response.body).toMatchObject({
+        success: false,
         message: 'Cannot force authenticate - still on login page',
-        currentUrl: 'https://www.linkedin.com/login'
+        currentUrl: 'https://www.linkedin.com/login',
       });
     });
 
     it('should handle errors during force authentication', async () => {
       // Setup
-      mockedSessionManager.getSession.mockImplementation(() => {
+      mockedLinkedInBrowser.isReady.mockImplementation(() => {
         throw new Error('Session error');
       });
 
       // Execution
       const response = await request(app)
         .post('/api/auth/force-authenticate')
-        .send({ sessionId: 'session123' });
+        .send({});
 
       // Assertion
       expect(response.status).toBe(500);
-      expect(response.body).toEqual({ 
-        success: false, 
-        message: 'Session error' 
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Session error',
       });
     });
   });

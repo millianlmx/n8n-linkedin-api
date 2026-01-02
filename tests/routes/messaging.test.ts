@@ -1,3 +1,65 @@
+// Mock dependencies BEFORE imports to prevent @2captcha/captcha-solver import errors
+jest.mock('puppeteer', () => ({
+  launch: jest.fn(),
+}));
+jest.mock('puppeteer-extra', () => ({
+  use: jest.fn(),
+  launch: jest.fn(),
+}));
+jest.mock('puppeteer-extra-plugin-stealth', () => jest.fn());
+jest.mock('@2captcha/captcha-solver', () => ({
+  Solver: jest.fn().mockImplementation(() => ({
+    recaptcha: jest.fn(),
+    hcaptcha: jest.fn(),
+  })),
+}));
+jest.mock('../../src/services/CaptchaService', () => ({
+  default: {
+    solveCaptcha: jest.fn(),
+  },
+}));
+
+// Mock service modules with factory functions to ensure proper mock injection
+const mockLinkedInBrowser = {
+  isReady: jest.fn(),
+  isAuthenticated: jest.fn(),
+  getOperationPage: jest.fn(),
+  getMonitoringPage: jest.fn(),
+  getBrowser: jest.fn(),
+  setAuthenticated: jest.fn(),
+  setUserIdentifier: jest.fn(),
+  initialize: jest.fn(),
+  saveState: jest.fn(),
+  getOrCreateMonitoringPage: jest.fn(),
+  focusOperationPage: jest.fn(),
+  focusMonitoringPage: jest.fn(),
+  getLinkedInCookies: jest.fn(),
+  closeMonitoringPage: jest.fn(),
+  getStatus: jest.fn(),
+  close: jest.fn(),
+  clearBrowserState: jest.fn(),
+};
+
+const mockBrowserStateService = {
+  hasBrowserState: jest.fn(),
+  restoreBrowserState: jest.fn(),
+  saveBrowserState: jest.fn(),
+  verifySession: jest.fn(),
+  deleteBrowserState: jest.fn(),
+};
+
+jest.mock('../../src/services/LinkedInService');
+jest.mock('../../src/services/SessionManager');
+jest.mock('../../src/services/LinkedInBrowser', () => ({
+  default: mockLinkedInBrowser,
+  __esModule: true,
+}));
+jest.mock('../../src/services/BrowserStateService', () => ({
+  default: mockBrowserStateService,
+  __esModule: true,
+}));
+jest.mock('../../src/services/CacheService');
+
 import express from 'express';
 import request from 'supertest';
 import fs from 'fs';
@@ -6,16 +68,32 @@ import messageRouter from '../../src/routes/message.routes';
 import LinkedInService from '../../src/services/LinkedInService';
 import SessionManager from '../../src/services/SessionManager';
 
-jest.mock('../../src/services/LinkedInService');
-jest.mock('../../src/services/SessionManager');
-jest.mock('../../src/services/CacheService');
-
 const app = express();
 app.use(express.json());
 app.use('/api/messages', messageRouter);
 
 const mockedLinkedInService = LinkedInService as jest.Mocked<typeof LinkedInService>;
 const mockedSessionManager = SessionManager as jest.Mocked<typeof SessionManager>;
+// Use the module-level mock objects directly
+const mockedLinkedInBrowser = mockLinkedInBrowser as {
+  isReady: jest.Mock;
+  isAuthenticated: jest.Mock;
+  getOperationPage: jest.Mock;
+  getMonitoringPage: jest.Mock;
+  getBrowser: jest.Mock;
+  setAuthenticated: jest.Mock;
+  setUserIdentifier: jest.Mock;
+  initialize: jest.Mock;
+  saveState: jest.Mock;
+  getOrCreateMonitoringPage: jest.Mock;
+  focusOperationPage: jest.Mock;
+  focusMonitoringPage: jest.Mock;
+  getLinkedInCookies: jest.Mock;
+  closeMonitoringPage: jest.Mock;
+  getStatus: jest.Mock;
+  close: jest.Mock;
+  clearBrowserState: jest.Mock;
+};
 
 const readMockHtml = (fileName: string): string => {
   return fs.readFileSync(path.join(__dirname, 'mocks', fileName), 'utf-8');
@@ -40,10 +118,15 @@ describe('Messaging API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedSessionManager.getSession.mockReturnValue(mockSession as any);
+    
+    // Default mock setup for LinkedInBrowser (new system)
+    mockedLinkedInBrowser.isReady.mockReturnValue(true);
+    mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
+    mockedLinkedInBrowser.getOperationPage.mockReturnValue(mockPage as any);
   });
 
   describe('GET /api/messages/conversations', () => {
-    it('should list all conversations', async () => {
+    it('should list all conversations with sessionId (legacy)', async () => {
       // Setup
       const mockConversations = [{ name: 'Test User', url: 'https://linkedin.com/messaging/thread/123' }];
       mockedLinkedInService.listConversations.mockResolvedValue({ success: true, data: mockConversations } as any);
@@ -59,16 +142,34 @@ describe('Messaging API', () => {
       expect(mockedLinkedInService.listConversations).toHaveBeenCalledWith('session123');
     });
 
-    it('should return a 400 error when sessionId is missing', async () => {
-      // Setup - no sessionId provided
+    it('should list all conversations without sessionId (new system)', async () => {
+      // Setup
+      const mockConversations = [{ name: 'Test User', url: 'https://linkedin.com/messaging/thread/123' }];
+      mockedLinkedInService.listConversations.mockResolvedValue({ success: true, data: mockConversations } as any);
 
       // Execution
       const response = await request(app)
         .get('/api/messages/conversations');
 
       // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID is required' });
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockConversations });
+    });
+
+    it('should return 503 when browser not ready and no sessionId (new system)', async () => {
+      // Setup
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/conversations');
+
+      // Assertion
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({
+        success: false,
+        message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+      });
     });
 
     it('should handle errors when listing conversations', async () => {
@@ -87,7 +188,7 @@ describe('Messaging API', () => {
   });
 
   describe('GET /api/messages/conversation', () => {
-    it('should read messages from a conversation', async () => {
+    it('should read messages from a conversation with sessionId (legacy)', async () => {
       // Setup
       const mockMessages = [{ sender: 'Test User', message: 'Hello!', timestamp: '2023-01-01' }];
       const conversationUrl = 'https://linkedin.com/messaging/thread/123';
@@ -102,6 +203,22 @@ describe('Messaging API', () => {
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockMessages });
       expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, undefined, false);
+    });
+
+    it('should read messages from a conversation without sessionId (new system)', async () => {
+      // Setup
+      const mockMessages = [{ sender: 'Test User', message: 'Hello!', timestamp: '2023-01-01' }];
+      const conversationUrl = 'https://linkedin.com/messaging/thread/123';
+      mockedLinkedInService.readConversation.mockResolvedValue({ success: true, data: mockMessages } as any);
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/conversation')
+        .query({ conversationUrl });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockMessages });
     });
 
     it('should read messages from a conversation with profileUrl for caching', async () => {
@@ -194,8 +311,9 @@ describe('Messaging API', () => {
       expect(response.body.cacheUpdated).toBe(false);
     });
 
-    it('should return a 400 error when sessionId is missing', async () => {
-      // Setup - no sessionId provided
+    it('should return 503 when browser not ready and no sessionId (new system)', async () => {
+      // Setup
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
 
       // Execution
       const response = await request(app)
@@ -203,8 +321,11 @@ describe('Messaging API', () => {
         .query({ conversationUrl: 'https://linkedin.com/messaging/thread/123' });
 
       // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID is required' });
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({
+        success: false,
+        message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+      });
     });
 
     it('should return a 400 error when conversationUrl is missing', async () => {
@@ -249,7 +370,7 @@ describe('Messaging API', () => {
   });
 
   describe('POST /api/messages/send', () => {
-    it('should send a message to a conversation', async () => {
+    it('should send a message to a conversation with sessionId (legacy)', async () => {
       // Setup
       const messageData = {
         sessionId: 'session123',
@@ -272,17 +393,39 @@ describe('Messaging API', () => {
       });
     });
 
-    it('should return a 400 error when sessionId is missing', async () => {
-      // Setup - no sessionId provided
+    it('should send a message to a conversation without sessionId (new system)', async () => {
+      // Setup
+      const messageData = {
+        conversationUrl: 'https://linkedin.com/messaging/thread/123',
+        message: 'Test message'
+      };
+      mockedLinkedInService.sendMessage.mockResolvedValue({ success: true, message: 'Message sent' } as any);
 
       // Execution
       const response = await request(app)
         .post('/api/messages/send')
-        .send({ conversationUrl: 'thread123', message: 'Test' });
+        .send(messageData);
 
       // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation URL, and message are required' });
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, message: 'Message sent' });
+    });
+
+    it('should return 503 when browser not ready and no sessionId (new system)', async () => {
+      // Setup
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
+
+      // Execution
+      const response = await request(app)
+        .post('/api/messages/send')
+        .send({ conversationUrl: 'https://linkedin.com/messaging/thread/123', message: 'Test' });
+
+      // Assertion
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({
+        success: false,
+        message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+      });
     });
 
     it('should return a 400 error when conversationUrl is missing', async () => {
@@ -295,7 +438,7 @@ describe('Messaging API', () => {
 
       // Assertion
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation URL, and message are required' });
+      expect(response.body).toEqual({ success: false, message: 'Conversation URL and message are required' });
     });
 
     it('should return a 400 error when message is missing', async () => {
@@ -308,7 +451,7 @@ describe('Messaging API', () => {
 
       // Assertion
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID, conversation URL, and message are required' });
+      expect(response.body).toEqual({ success: false, message: 'Conversation URL and message are required' });
     });
 
     it('should return a 400 error when conversationUrl is invalid', async () => {
@@ -340,7 +483,7 @@ describe('Messaging API', () => {
   });
 
   describe('GET /api/messages/unread', () => {
-    it('should get unread messages', async () => {
+    it('should get unread messages with sessionId (legacy)', async () => {
       // Setup
       const mockUnreadMessages = [{ sender: 'User1', message: 'New message' }];
       mockedLinkedInService.getUnreadMessages.mockResolvedValue({ success: true, data: mockUnreadMessages } as any);
@@ -356,16 +499,34 @@ describe('Messaging API', () => {
       expect(mockedLinkedInService.getUnreadMessages).toHaveBeenCalledWith('session123');
     });
 
-    it('should return a 400 error when sessionId is missing', async () => {
-      // Setup - no sessionId provided
+    it('should get unread messages without sessionId (new system)', async () => {
+      // Setup
+      const mockUnreadMessages = [{ sender: 'User1', message: 'New message' }];
+      mockedLinkedInService.getUnreadMessages.mockResolvedValue({ success: true, data: mockUnreadMessages } as any);
 
       // Execution
       const response = await request(app)
         .get('/api/messages/unread');
 
       // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({ success: false, message: 'Session ID is required' });
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockUnreadMessages });
+    });
+
+    it('should return 503 when browser not ready and no sessionId (new system)', async () => {
+      // Setup
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
+
+      // Execution
+      const response = await request(app)
+        .get('/api/messages/unread');
+
+      // Assertion
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({
+        success: false,
+        message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+      });
     });
 
     it('should handle errors when getting unread messages', async () => {
