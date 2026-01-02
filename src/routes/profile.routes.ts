@@ -1,10 +1,15 @@
 import { Router, Request, Response } from 'express';
 import LinkedInService from '../services/LinkedInService';
+import LinkedInBrowser from '../services/LinkedInBrowser';
 import SessionManager from '../services/SessionManager';
+import { requireAuth, AuthenticatedRequest } from '../middleware/session.middleware';
 import { createServiceLogger } from '../utils/logger';
 
 const router = Router();
 const log = createServiceLogger('ProfileRoutes');
+
+// Flag to control whether to use new LinkedInBrowser (should match LinkedInService)
+const USE_NEW_BROWSER = true;
 
 /**
  * Validates UUID format
@@ -30,7 +35,7 @@ function isValidLinkedInUrl(url: string): boolean {
 /**
  * POST /api/profile/scrape
  * Scrape a LinkedIn profile
- * Body: { sessionId: string, url: string }
+ * Body: { url: string } (sessionId is optional when using new browser system)
  */
 router.post('/scrape', async (req: Request, res: Response) => {
   const requestId = `scrape-${Date.now()}`;
@@ -38,14 +43,77 @@ router.post('/scrape', async (req: Request, res: Response) => {
   
   log.info('Profile scrape request received', { 
     requestId,
-    body: JSON.stringify(req.body),
+    useNewBrowser: USE_NEW_BROWSER,
   });
 
   try {
     const { sessionId, url } = req.body;
     
+    // Validate URL first (required for both modes)
+    if (!url) {
+      log.warn('Missing URL', { requestId });
+      return res.status(400).json({
+        success: false,
+        message: 'Profile URL is required',
+        requestId,
+      });
+    }
+
+    if (typeof url !== 'string') {
+      log.warn('Invalid URL type', { requestId, type: typeof url, value: JSON.stringify(url) });
+      return res.status(400).json({
+        success: false,
+        message: `URL must be a string, got ${typeof url}: ${JSON.stringify(url)}`,
+        requestId,
+      });
+    }
+
+    if (!isValidLinkedInUrl(url)) {
+      log.warn('Invalid LinkedIn URL', { requestId, url });
+      return res.status(400).json({
+        success: false,
+        message: `Invalid LinkedIn profile URL: "${url}". URL must be a valid LinkedIn profile URL (e.g., https://www.linkedin.com/in/username/)`,
+        requestId,
+      });
+    }
+
+    // When using new browser system, sessionId is optional
+    if (USE_NEW_BROWSER) {
+      // Check if browser is ready and authenticated
+      if (!LinkedInBrowser.isReady()) {
+        return res.status(503).json({
+          success: false,
+          message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+          requestId,
+        });
+      }
+      
+      if (!LinkedInBrowser.isAuthenticated()) {
+        return res.status(401).json({
+          success: false,
+          message: 'Not authenticated. Please call POST /api/auth/login first.',
+          requestId,
+        });
+      }
+
+      log.debug('Using new browser system for scraping', { requestId });
+      
+      // Call scrapeProfile with a dummy sessionId (will be ignored by new system)
+      const result = await LinkedInService.scrapeProfile('unused', { url });
+
+      const duration = Date.now() - startTime;
+      log.info('Profile scrape completed successfully', { 
+        requestId, 
+        duration: `${duration}ms`,
+        profileName: result.data?.name || 'unknown'
+      });
+
+      return res.json(result);
+    }
+
+    // Legacy mode: sessionId is required
     // Log the EXACT sessionId received (full value, not truncated)
-    log.debug('Received sessionId details', {
+    log.debug('Using legacy session system', {
       requestId,
       sessionIdRaw: sessionId,
       sessionIdLength: sessionId?.length,
@@ -87,34 +155,6 @@ router.post('/scrape', async (req: Request, res: Response) => {
         message: `Invalid Session ID format. Expected UUID, got: "${sessionId}". Use GET /api/auth/sessions to get valid session IDs.`,
         requestId,
         availableSessions: availableSessions.map(s => ({ id: s.id, isAuthenticated: s.isAuthenticated })),
-      });
-    }
-
-    // Validate URL
-    if (!url) {
-      log.warn('Missing URL', { requestId });
-      return res.status(400).json({
-        success: false,
-        message: 'Profile URL is required',
-        requestId,
-      });
-    }
-
-    if (typeof url !== 'string') {
-      log.warn('Invalid URL type', { requestId, type: typeof url, value: JSON.stringify(url) });
-      return res.status(400).json({
-        success: false,
-        message: `URL must be a string, got ${typeof url}: ${JSON.stringify(url)}`,
-        requestId,
-      });
-    }
-
-    if (!isValidLinkedInUrl(url)) {
-      log.warn('Invalid LinkedIn URL', { requestId, url });
-      return res.status(400).json({
-        success: false,
-        message: `Invalid LinkedIn profile URL: "${url}". URL must be a valid LinkedIn profile URL (e.g., https://www.linkedin.com/in/username/)`,
-        requestId,
       });
     }
 
@@ -171,7 +211,7 @@ router.post('/scrape', async (req: Request, res: Response) => {
     let statusCode = 500;
     if (error.message.includes('Not authenticated') || error.message.includes('Session expired')) {
       statusCode = 401;
-    } else if (error.message.includes('Session not found')) {
+    } else if (error.message.includes('Session not found') || error.message.includes('Browser not initialized')) {
       statusCode = 404;
     }
     
