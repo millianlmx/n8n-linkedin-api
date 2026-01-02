@@ -101,7 +101,9 @@ export class BrowserStateService {
       log.debug('Browser state collected', { 
         cookieCount: cookies.length,
         localStorageItems: Object.keys(storageData.localStorage).length,
-        sessionStorageItems: Object.keys(storageData.sessionStorage).length
+        sessionStorageItems: Object.keys(storageData.sessionStorage).length,
+        cookieNames: cookies.map(c => c.name).join(', '),
+        hasLiAt: cookies.some(c => c.name === 'li_at')
       });
       
       // Get user agent

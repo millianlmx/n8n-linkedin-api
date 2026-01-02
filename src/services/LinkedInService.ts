@@ -119,12 +119,22 @@ class LinkedInService {
       const hasLiAt = linkedInCookies.some(c => c.name === 'li_at');
       const hasJsessionId = linkedInCookies.some(c => c.name === 'JSESSIONID');
       
+      // Log all LinkedIn cookie names for debugging
+      const cookieNames = linkedInCookies.map(c => c.name);
       log.debug('Cookie verification', { 
         totalCookies: cookies.length, 
         linkedInCookies: linkedInCookies.length,
         hasLiAt,
-        hasJsessionId
+        hasJsessionId,
+        cookieNames: cookieNames.join(', ')
       });
+      
+      // If li_at is missing, log more details to help diagnose
+      if (!hasLiAt) {
+        log.warn('li_at cookie missing - checking all cookies for auth-related ones', {
+          allCookieNames: cookies.map(c => `${c.name}@${c.domain}`).join(', ')
+        });
+      }
       
       // li_at is the main auth cookie - it's essential for authentication
       const valid = hasLiAt && linkedInCookies.length > 5;
@@ -436,6 +446,20 @@ class LinkedInService {
         });
 
         log.info('Login successful', { sessionId });
+
+        // Verify cookies are present after login
+        const browserContext = session.browser.defaultBrowserContext();
+        const postLoginCookies = await browserContext.cookies();
+        const hasLiAt = postLoginCookies.some(c => c.name === 'li_at');
+        log.info('Post-login cookie check', {
+          totalCookies: postLoginCookies.length,
+          hasLiAt,
+          cookieNames: postLoginCookies.map(c => c.name).join(', ')
+        });
+        
+        if (!hasLiAt) {
+          log.error('CRITICAL: li_at cookie not found after successful login!');
+        }
 
         // Save browser state (cookies, localStorage, sessionStorage)
         try {
