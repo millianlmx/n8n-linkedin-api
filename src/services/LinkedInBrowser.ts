@@ -208,7 +208,7 @@ class LinkedInBrowser {
     // Set up console logging for debugging
     operationPage.on('console', (msg) => {
       if (msg.type() === 'error') {
-        log.debug('[Browser] ', msg.text());
+        log.debug('[Browser] ' + msg.text());
       }
     });
 
@@ -300,7 +300,7 @@ class LinkedInBrowser {
     // Set up console logging
     monitoringPage.on('console', (msg) => {
       if (msg.type() === 'error') {
-        log.debug('[Monitoring] ', msg.text());
+        log.debug('[Monitoring] ' + msg.text());
       }
     });
 
@@ -365,28 +365,33 @@ class LinkedInBrowser {
   }
 
   /**
-   * Get cookies for LinkedIn domains
+   * Get cookies for LinkedIn domains using browser context
+   * This ensures we get ALL cookies regardless of current page
    */
   async getLinkedInCookies(): Promise<{ valid: boolean; hasLiAt: boolean; cookieCount: number; cookies: any[] }> {
-    if (!this.state?.operationPage) {
+    if (!this.state?.browser) {
       return { valid: false, hasLiAt: false, cookieCount: 0, cookies: [] };
     }
 
     try {
-      const cookies = await this.state.operationPage.cookies(
-        'https://www.linkedin.com',
-        'https://linkedin.com'
-      );
+      // Use browser context to get ALL cookies, not just current page cookies
+      const browserContext = this.state.browser.defaultBrowserContext();
+      const allCookies = await browserContext.cookies();
 
-      const linkedInCookies = cookies.filter(c => c.domain.includes('linkedin.com'));
+      // Filter for LinkedIn cookies
+      const linkedInCookies = allCookies.filter(c => 
+        c.domain.includes('linkedin.com')
+      );
+      
       const hasLiAt = linkedInCookies.some(c => c.name === 'li_at');
       const valid = hasLiAt && linkedInCookies.length > 5;
 
-      log.debug('Cookie check', {
-        total: cookies.length,
+      log.debug('Cookie check (browser context)', {
+        total: allCookies.length,
         linkedIn: linkedInCookies.length,
         hasLiAt,
-        valid
+        valid,
+        cookieNames: linkedInCookies.map(c => c.name).join(', ')
       });
 
       return { valid, hasLiAt, cookieCount: linkedInCookies.length, cookies: linkedInCookies };

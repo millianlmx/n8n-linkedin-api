@@ -586,20 +586,39 @@ class LinkedInService {
 
         log.info('Login successful');
 
-        // Verify cookies are present after login
-        const postLoginCookies = await page.cookies(
-          'https://www.linkedin.com',
-          'https://linkedin.com'
-        );
-        const hasLiAt = postLoginCookies.some(c => c.name === 'li_at');
-        log.info('Post-login cookie check', {
-          totalCookies: postLoginCookies.length,
-          hasLiAt,
-          cookieNames: postLoginCookies.map(c => c.name).join(', ')
-        });
-        
-        if (!hasLiAt) {
-          log.error('CRITICAL: li_at cookie not found after successful login!');
+        // Verify cookies are present after login using browser context
+        const browser = this.getBrowserInstance();
+        if (browser) {
+          const browserContext = browser.defaultBrowserContext();
+          const postLoginCookies = await browserContext.cookies();
+          const linkedInCookies = postLoginCookies.filter(c => c.domain.includes('linkedin.com'));
+          const hasLiAt = linkedInCookies.some(c => c.name === 'li_at');
+          log.info('Post-login cookie check (browser context)', {
+            totalCookies: postLoginCookies.length,
+            linkedInCookies: linkedInCookies.length,
+            hasLiAt,
+            cookieNames: linkedInCookies.map(c => c.name).join(', ')
+          });
+          
+          if (!hasLiAt) {
+            log.error('CRITICAL: li_at cookie not found after successful login!');
+          }
+        } else {
+          // Fallback to page cookies
+          const postLoginCookies = await page.cookies(
+            'https://www.linkedin.com',
+            'https://linkedin.com'
+          );
+          const hasLiAt = postLoginCookies.some(c => c.name === 'li_at');
+          log.info('Post-login cookie check (page)', {
+            totalCookies: postLoginCookies.length,
+            hasLiAt,
+            cookieNames: postLoginCookies.map(c => c.name).join(', ')
+          });
+          
+          if (!hasLiAt) {
+            log.error('CRITICAL: li_at cookie not found after successful login!');
+          }
         }
 
         // Save browser state (cookies, localStorage, sessionStorage)
@@ -617,6 +636,8 @@ class LinkedInService {
         // Automatically start message monitoring in a separate tab
         log.debug('Starting automatic message monitoring');
         try {
+          // Wait a moment for cookies to fully propagate before opening new tab
+          await this.wait(1000);
           await this.startMessageMonitoring(sessionId);
           log.info('Message monitoring started');
         } catch (monitoringError: any) {
