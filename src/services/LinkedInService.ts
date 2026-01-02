@@ -1108,69 +1108,88 @@ class LinkedInService {
    */
   async scrapeProfile(sessionId: string, request: ProfileScrapeRequest) {
     const startTime = Date.now();
+    const scrapeId = `scrape-${Date.now()}`;
+    
+    log.info('Starting profile scrape', { scrapeId, url: request.url, sessionId: sessionId.substring(0, 8) });
+    
+    // Step 1: Validate session
+    log.debug('[Step 1/8] Validating session', { scrapeId });
     const session = SessionManager.getSession(sessionId);
-    if (!session || !session.isAuthenticated) {
+    if (!session) {
+      log.error('[Step 1/8] Session not found', { scrapeId, sessionId: sessionId.substring(0, 8) });
+      throw new Error('Session not found');
+    }
+    if (!session.isAuthenticated) {
+      log.error('[Step 1/8] Session not authenticated', { scrapeId, sessionId: sessionId.substring(0, 8) });
       throw new Error('Not authenticated');
     }
+    log.debug('[Step 1/8] Session validated successfully', { scrapeId, isAuthenticated: session.isAuthenticated });
 
+    // Step 2: Check cache
+    log.debug('[Step 2/8] Checking cache', { scrapeId, url: request.url });
     const cachedProfile = await this.cacheService.getProfile(request.url);
     if (cachedProfile) {
-      log.debug('Returning cached profile', { url: request.url });
+      log.info('[Step 2/8] Cache hit - returning cached profile', { scrapeId, url: request.url });
       MetricsService.trackCacheOperation('get', 'hit');
       return { success: true, data: cachedProfile };
     }
-
+    log.debug('[Step 2/8] Cache miss - will scrape from LinkedIn', { scrapeId });
     MetricsService.trackCacheOperation('get', 'miss');
 
     const { page } = session;
 
     try {
-      // Enforce rate limiting
+      // Step 3: Rate limiting
+      log.debug('[Step 3/8] Enforcing rate limit', { scrapeId });
       await this.enforceRateLimit();
+      log.debug('[Step 3/8] Rate limit check passed', { scrapeId });
 
-      // Switch to operation page
+      // Step 4: Switch to operation page
+      log.debug('[Step 4/8] Switching to operation page', { scrapeId });
       await this.switchToOperationPage(sessionId);
+      log.debug('[Step 4/8] Switched to operation page', { scrapeId });
 
-      log.info('Scraping profile', { url: request.url });
-
-      // Verify cookies are still present (read-only check, no modification)
+      // Step 5: Verify cookies
+      log.debug('[Step 5/8] Verifying cookies', { scrapeId });
       const cookieStatus = await this.verifyCookiesPresent(sessionId);
-      log.debug('Cookie status before navigation', cookieStatus);
+      log.debug('[Step 5/8] Cookie verification result', { scrapeId, ...cookieStatus });
       
       if (!cookieStatus.valid) {
-        log.error('Essential cookies missing - session likely expired', cookieStatus);
-        
-        // Mark session as not authenticated
-        SessionManager.updateSession(sessionId, {
-          isAuthenticated: false,
-        });
-        
+        log.error('[Step 5/8] Essential cookies missing - session likely expired', { scrapeId, ...cookieStatus });
+        SessionManager.updateSession(sessionId, { isAuthenticated: false });
         throw new Error('Session expired (cookies missing). Please login again.');
       }
 
-      // Navigate to profile with domcontentloaded (faster than networkidle2)
-      await page.goto(request.url, {
-        waitUntil: 'domcontentloaded',
-        timeout: 10000, // Reduced from 60s to 10s
-      });
+      // Step 6: Navigate to profile
+      log.debug('[Step 6/8] Navigating to profile URL', { scrapeId, url: request.url });
+      const navStartTime = Date.now();
+      
+      try {
+        await page.goto(request.url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 10000,
+        });
+        log.debug('[Step 6/8] Navigation completed', { scrapeId, duration: `${Date.now() - navStartTime}ms` });
+      } catch (navError: any) {
+        log.error('[Step 6/8] Navigation failed', navError, { scrapeId, url: request.url });
+        throw new Error(`Navigation failed: ${navError.message}`);
+      }
 
-      // Wait a bit for page to load
+      // Wait for page to stabilize
       await this.wait(2000);
 
-      // Check if we got redirected to login page (authentication lost)
+      // Step 7: Validate page state
+      log.debug('[Step 7/8] Validating page state', { scrapeId });
       const currentUrl = page.url();
+      log.debug('[Step 7/8] Current URL after navigation', { scrapeId, currentUrl });
+      
       if (currentUrl.includes('/login') || currentUrl.includes('/uas/login')) {
-        log.error('Redirected to login page - session expired', { currentUrl });
-        
-        // Mark session as not authenticated
-        SessionManager.updateSession(sessionId, {
-          isAuthenticated: false,
-        });
-        
+        log.error('[Step 7/8] Redirected to login page - session expired', { scrapeId, currentUrl });
+        SessionManager.updateSession(sessionId, { isAuthenticated: false });
         throw new Error('Session expired. Please login again.');
       }
 
-      // Check for login form in the page content with more detailed diagnostics
+      // Check page content for login form
       const pageState = await page.evaluate(() => {
         const hasSignInForm = !!document.querySelector('form[data-id="sign-in-form"]');
         const hasPasswordField = !!document.querySelector('input[type="password"][name="session_password"]');
@@ -1180,6 +1199,7 @@ class LinkedInService {
                                   !!document.querySelector('h1');
         const pageTitle = document.title;
         const bodyClasses = document.body?.className || '';
+        const htmlLength = document.documentElement.outerHTML.length;
         
         return {
           hasSignInForm,
@@ -1188,48 +1208,59 @@ class LinkedInService {
           hasProfileContent,
           pageTitle,
           bodyClasses,
+          htmlLength,
           hasLoginForm: hasSignInForm || hasPasswordField || hasAuthWall
         };
       });
 
-      log.debug('Page state after navigation', { 
-        url: currentUrl,
-        ...pageState 
-      });
+      log.debug('[Step 7/8] Page state analysis', { scrapeId, ...pageState });
 
       if (pageState.hasLoginForm && !pageState.hasProfileContent) {
-        log.error('Login form detected on page - session expired', { 
-          url: currentUrl,
-          pageTitle: pageState.pageTitle 
-        });
-        
-        // Mark session as not authenticated
-        SessionManager.updateSession(sessionId, {
-          isAuthenticated: false,
-        });
-        
+        log.error('[Step 7/8] Login form detected - session expired', { scrapeId, pageTitle: pageState.pageTitle });
+        SessionManager.updateSession(sessionId, { isAuthenticated: false });
         throw new Error('Session expired. Please login again.');
       }
 
-      // Wait for main content to appear - use Promise.race for faster fallback
+      // Wait for main content
+      log.debug('[Step 7/8] Waiting for main content selectors', { scrapeId });
       await Promise.race([
         page.waitForSelector('.scaffold-layout__main', { timeout: 4000 }),
         page.waitForSelector('main', { timeout: 4000 }),
-        page.waitForSelector('h1', { timeout: 4000 }), // Name should always be present
+        page.waitForSelector('h1', { timeout: 4000 }),
       ]).catch(() => {
-        // If all fail, continue anyway - data extraction will handle missing elements
-        log.debug('Main content selector timeout, continuing');
+        log.warn('[Step 7/8] Main content selector timeout - continuing anyway', { scrapeId });
       });
 
-      // Wait for content to render
       await this.wait(1000);
+      log.debug('[Step 7/8] Page state validation complete', { scrapeId });
 
-      log.debug('Page content loaded');
+      // Step 8: Extract profile data
+      log.debug('[Step 8/8] Extracting profile data', { scrapeId });
+      const extractStartTime = Date.now();
+      
+      let profileData;
+      try {
+        profileData = await page.evaluate(DOMFunctions.extractProfileData);
+        log.debug('[Step 8/8] Profile data extracted', { 
+          scrapeId, 
+          duration: `${Date.now() - extractStartTime}ms`,
+          hasName: !!profileData.name,
+          hasHeadline: !!profileData.headline
+        });
+      } catch (extractError: any) {
+        log.error('[Step 8/8] Profile extraction failed', extractError, { scrapeId });
+        throw new Error(`Profile extraction failed: ${extractError.message}`);
+      }
 
-      // Extract profile data using extracted DOM function
-      const profileData = await page.evaluate(DOMFunctions.extractProfileData);
+      if (!profileData.name) {
+        log.warn('[Step 8/8] Extracted profile has no name - data may be incomplete', { scrapeId, profileData });
+      }
 
-      log.info('Profile scraped successfully', { name: profileData.name });
+      log.info('Profile scraped successfully', { 
+        scrapeId, 
+        name: profileData.name,
+        totalDuration: `${Date.now() - startTime}ms`
+      });
 
       // Save to cache
       await this.cacheService.cacheProfile(request.url, profileData);
@@ -1244,12 +1275,23 @@ class LinkedInService {
 
       return { success: true, data: profileData };
     } catch (error: any) {
-      log.error('Profile scraping failed', error);
+      const duration = (Date.now() - startTime) / 1000;
+      log.error('Profile scraping failed', error, { 
+        scrapeId, 
+        url: request.url,
+        duration: `${duration}s`,
+        errorMessage: error.message,
+        errorStack: error.stack
+      });
+      
       // Switch back to monitoring page even on error
-      await this.switchToMonitoringPage(sessionId);
+      try {
+        await this.switchToMonitoringPage(sessionId);
+      } catch (switchError: any) {
+        log.warn('Failed to switch back to monitoring page after error', { scrapeId, switchError: switchError.message });
+      }
 
       // Track failed operation
-      const duration = (Date.now() - startTime) / 1000;
       MetricsService.trackLinkedInOperation('profile_scrape', duration, false);
 
       throw new Error(`Profile scraping failed: ${error.message}`);
