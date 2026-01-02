@@ -23,7 +23,7 @@ export class LinkedInApi implements ICredentialType {
 			name: 'email',
 			type: 'string',
 			default: '',
-			description: 'LinkedIn email (optional if set in .env)',
+			description: 'LinkedIn email (optional - can also be set in API .env or provided per-request)',
 			placeholder: 'your-email@example.com',
 		},
 		{
@@ -34,7 +34,14 @@ export class LinkedInApi implements ICredentialType {
 				password: true,
 			},
 			default: '',
-			description: 'LinkedIn password (optional if set in .env)',
+			description: 'LinkedIn password (optional - can also be set in API .env or provided per-request)',
+		},
+		{
+			displayName: 'Notice',
+			name: 'notice',
+			type: 'notice',
+			default: '',
+			description: 'NEW: Session IDs are now optional. Use the new "Initialize" operation for simplified browser management. Legacy session-based mode is still supported for backward compatibility.',
 		},
 	];
 

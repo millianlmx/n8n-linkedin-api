@@ -29,15 +29,6 @@ export class Search implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'Session ID',
-				name: 'sessionId',
-				type: 'string',
-				default: '={{$json.sessionId}}',
-				required: true,
-				description: 'Session ID from LinkedIn Login node',
-				placeholder: 'Session ID from previous node',
-			},
-			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
@@ -82,6 +73,14 @@ export class Search implements INodeType {
 					maxValue: 100,
 				},
 			},
+			{
+				displayName: 'Session ID (Legacy)',
+				name: 'sessionId',
+				type: 'string',
+				default: '',
+				description: 'Optional: Session ID for legacy mode. Leave empty for new singleton browser mode.',
+				placeholder: 'Leave empty for new mode',
+			},
 		],
 	};
 
@@ -96,11 +95,19 @@ export class Search implements INodeType {
 		for (let i = 0; i < items.length; i++) {
 			try {
 				let responseData;
-				const sessionId = this.getNodeParameter('sessionId', i) as string;
+				const sessionId = this.getNodeParameter('sessionId', i, '') as string;
 
 				if (operation === 'searchPeople') {
 					const keywords = this.getNodeParameter('keywords', i) as string;
 					const limit = this.getNodeParameter('limit', i, 50) as number;
+
+					const body: any = {
+						keywords,
+						limit,
+					};
+					if (sessionId) {
+						body.sessionId = sessionId;
+					}
 
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
@@ -108,11 +115,7 @@ export class Search implements INodeType {
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						body: {
-							sessionId,
-							keywords,
-							limit,
-						},
+						body,
 						json: true,
 					});
 

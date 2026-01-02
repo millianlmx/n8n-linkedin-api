@@ -34,10 +34,28 @@ export class Login implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
-						name: 'Initialize and Login',
+						name: 'Initialize',
+						value: 'initialize',
+						description: 'Initialize browser (new simplified mode - no session ID needed)',
+						action: 'Initialize browser',
+					},
+					{
+						name: 'Initialize and Login (Legacy)',
 						value: 'login',
-						description: 'Initialize browser and login to LinkedIn',
+						description: 'Initialize browser and login to LinkedIn (returns session ID for backward compatibility)',
 						action: 'Initialize and login to LinkedIn',
+					},
+					{
+						name: 'Login',
+						value: 'loginOnly',
+						description: 'Login to LinkedIn (after Initialize)',
+						action: 'Login to LinkedIn',
+					},
+					{
+						name: 'Get Status',
+						value: 'getStatus',
+						description: 'Get current authentication status',
+						action: 'Get authentication status',
 					},
 					{
 						name: 'Logout',
@@ -46,13 +64,19 @@ export class Login implements INodeType {
 						action: 'Logout and close browser session',
 					},
 					{
-						name: 'Get Active Sessions',
+						name: 'Force Authenticate',
+						value: 'forceAuthenticate',
+						description: 'Force mark session as authenticated (workaround for timeouts)',
+						action: 'Force authenticate session',
+					},
+					{
+						name: 'Get Active Sessions (Legacy)',
 						value: 'getActiveSessions',
 						description: 'Retrieve the list of active sessions',
 						action: 'Get active sessions',
 					},
 				],
-				default: 'login',
+				default: 'initialize',
 			},
 			{
 				displayName: 'Email',
@@ -61,10 +85,10 @@ export class Login implements INodeType {
 				default: '',
 				displayOptions: {
 					show: {
-						operation: ['login'],
+						operation: ['login', 'loginOnly', 'initialize'],
 					},
 				},
-				description: 'LinkedIn email (optional if set in API .env)',
+				description: 'LinkedIn email (optional if set in API .env). Used to restore saved browser state.',
 				placeholder: 'your-email@example.com',
 			},
 			{
@@ -77,24 +101,23 @@ export class Login implements INodeType {
 				default: '',
 				displayOptions: {
 					show: {
-						operation: ['login'],
+						operation: ['login', 'loginOnly'],
 					},
 				},
 				description: 'LinkedIn password (optional if set in API .env)',
 			},
 			{
-				displayName: 'Session ID',
+				displayName: 'Session ID (Legacy)',
 				name: 'sessionId',
 				type: 'string',
 				default: '',
-				required: true,
 				displayOptions: {
 					show: {
-						operation: ['logout'],
+						operation: ['logout', 'forceAuthenticate'],
 					},
 				},
-				description: 'The session ID to logout (from login operation)',
-				placeholder: 'Enter session ID or use expression: {{$json.sessionId}}',
+				description: 'Optional session ID for legacy mode. Leave empty to use new singleton browser.',
+				placeholder: 'Leave empty for new mode or enter session ID for legacy',
 			},
 		],
 	};
@@ -111,20 +134,43 @@ export class Login implements INodeType {
 			try {
 				let responseData;
 
-				if (operation === 'login') {
-					// Get email and password from node parameters or credentials
+				if (operation === 'initialize') {
+					// New simplified initialization - no session ID needed
+					const email = this.getNodeParameter('email', i, '') as string || credentials.email as string;
+
+					const initResponse = await this.helpers.httpRequest({
+						method: 'POST',
+						url: `${baseUrl}/api/auth/initialize`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: email ? { email } : {},
+						json: true,
+						timeout: 120000, // 2 minutes for browser initialization
+					});
+
+					responseData = {
+						success: initResponse.success,
+						sessionRestored: initResponse.sessionRestored || false,
+						isAuthenticated: initResponse.isAuthenticated || false,
+						message: initResponse.message || 'Browser initialized',
+						timestamp: new Date().toISOString(),
+					};
+				} else if (operation === 'login') {
+					// Legacy mode: Initialize + Login with session ID
 					const email = this.getNodeParameter('email', i, '') as string || credentials.email as string;
 					const password = this.getNodeParameter('password', i, '') as string || credentials.password as string;
 
-					// Step 1: Initialize browser session
+					// Step 1: Initialize browser session (legacy endpoint)
 					const initResponse = await this.helpers.httpRequest({
 						method: 'POST',
 						url: `${baseUrl}/api/auth/init`,
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						body: {},
+						body: email ? { email } : {},
 						json: true,
+						timeout: 120000,
 					});
 
 					const sessionId = initResponse.sessionId;
@@ -133,18 +179,48 @@ export class Login implements INodeType {
 						throw new Error('Failed to initialize session: No session ID returned');
 					}
 
-					// Step 2: Login with credentials
-					const loginBody: any = {
-						sessionId,
-					};
+					// If session was already restored, we're done
+					if (initResponse.sessionRestored) {
+						responseData = {
+							success: true,
+							sessionId: sessionId,
+							sessionRestored: true,
+							message: 'Session restored from saved state',
+							timestamp: new Date().toISOString(),
+						};
+					} else {
+						// Step 2: Login with credentials
+						const loginBody: any = { sessionId };
+						if (email) loginBody.email = email;
+						if (password) loginBody.password = password;
 
-					// Only include email/password if provided
-					if (email) {
-						loginBody.email = email;
+						const loginResponse = await this.helpers.httpRequest({
+							method: 'POST',
+							url: `${baseUrl}/api/auth/login`,
+							headers: {
+								'Content-Type': 'application/json',
+							},
+							body: loginBody,
+							json: true,
+							timeout: 120000,
+						});
+
+						responseData = {
+							success: loginResponse.success || true,
+							sessionId: sessionId,
+							sessionRestored: loginResponse.sessionRestored || false,
+							message: loginResponse.message || 'Successfully logged in to LinkedIn',
+							timestamp: new Date().toISOString(),
+						};
 					}
-					if (password) {
-						loginBody.password = password;
-					}
+				} else if (operation === 'loginOnly') {
+					// Login only (assumes browser is already initialized)
+					const email = this.getNodeParameter('email', i, '') as string || credentials.email as string;
+					const password = this.getNodeParameter('password', i, '') as string || credentials.password as string;
+
+					const loginBody: any = {};
+					if (email) loginBody.email = email;
+					if (password) loginBody.password = password;
 
 					const loginResponse = await this.helpers.httpRequest({
 						method: 'POST',
@@ -154,45 +230,72 @@ export class Login implements INodeType {
 						},
 						body: loginBody,
 						json: true,
+						timeout: 120000,
 					});
 
-					// Return session ID and login status
 					responseData = {
-						success: loginResponse.success || true,
-						sessionId: sessionId,
-						message: loginResponse.message || 'Successfully logged in to LinkedIn',
+						success: loginResponse.success,
+						sessionRestored: loginResponse.sessionRestored || false,
+						message: loginResponse.message || 'Login successful',
+						timestamp: new Date().toISOString(),
+					};
+				} else if (operation === 'getStatus') {
+					// Get authentication status
+					const statusResponse = await this.helpers.httpRequest({
+						method: 'GET',
+						url: `${baseUrl}/api/auth/status`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						json: true,
+					});
+
+					responseData = {
+						success: statusResponse.success,
+						ready: statusResponse.ready,
+						authenticated: statusResponse.authenticated,
+						hasMonitoring: statusResponse.hasMonitoring,
+						userIdentifier: statusResponse.userIdentifier,
 						timestamp: new Date().toISOString(),
 					};
 				} else if (operation === 'logout') {
-					// Get session ID from node parameter
-					const sessionId = this.getNodeParameter('sessionId', i) as string;
+					const sessionId = this.getNodeParameter('sessionId', i, '') as string;
 
-					if (!sessionId) {
-						throw new Error('Session ID is required for logout');
-					}
-
-					// Call logout endpoint
 					const logoutResponse = await this.helpers.httpRequest({
 						method: 'DELETE',
 						url: `${baseUrl}/api/auth/logout`,
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						body: {
-							sessionId,
-						},
+						body: sessionId ? { sessionId } : {},
 						json: true,
 					});
 
-					// Return logout status
 					responseData = {
 						success: logoutResponse.success || true,
-						sessionId: sessionId,
 						message: logoutResponse.message || 'Successfully logged out',
 						timestamp: new Date().toISOString(),
 					};
+				} else if (operation === 'forceAuthenticate') {
+					const sessionId = this.getNodeParameter('sessionId', i, '') as string;
+
+					const forceAuthResponse = await this.helpers.httpRequest({
+						method: 'POST',
+						url: `${baseUrl}/api/auth/force-authenticate`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: sessionId ? { sessionId } : {},
+						json: true,
+					});
+
+					responseData = {
+						success: forceAuthResponse.success,
+						message: forceAuthResponse.message,
+						currentUrl: forceAuthResponse.currentUrl,
+						timestamp: new Date().toISOString(),
+					};
 				} else if (operation === 'getActiveSessions') {
-					// Call endpoint to get active sessions
 					const sessionsResponse = await this.helpers.httpRequest({
 						method: 'GET',
 						url: `${baseUrl}/api/auth/sessions`,
@@ -202,10 +305,10 @@ export class Login implements INodeType {
 						json: true,
 					});
 
-					// Return active sessions
 					responseData = {
 						success: true,
 						sessions: sessionsResponse.sessions || [],
+						count: sessionsResponse.count || 0,
 						timestamp: new Date().toISOString(),
 					};
 				}

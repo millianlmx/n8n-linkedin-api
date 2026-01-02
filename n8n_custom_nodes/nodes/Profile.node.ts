@@ -29,15 +29,6 @@ export class Profile implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'Session ID',
-				name: 'sessionId',
-				type: 'string',
-				default: '={{$json.sessionId}}',
-				required: true,
-				description: 'Session ID from LinkedIn Login node',
-				placeholder: 'Session ID from previous node',
-			},
-			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
@@ -64,7 +55,7 @@ export class Profile implements INodeType {
 				],
 				default: 'scrapeProfile',
 			},
-			// Scrape Profile fields
+			// Profile URL field for scrape and visit operations
 			{
 				displayName: 'Profile URL',
 				name: 'url',
@@ -78,6 +69,15 @@ export class Profile implements INodeType {
 				},
 				description: 'The LinkedIn profile URL to scrape or visit',
 				placeholder: 'https://www.linkedin.com/in/username/',
+			},
+			// Session ID - now optional for backward compatibility
+			{
+				displayName: 'Session ID (Legacy)',
+				name: 'sessionId',
+				type: 'string',
+				default: '',
+				description: 'Optional session ID for legacy mode. Leave empty to use new singleton browser.',
+				placeholder: 'Leave empty for new mode',
 			},
 		],
 	};
@@ -93,10 +93,13 @@ export class Profile implements INodeType {
 		for (let i = 0; i < items.length; i++) {
 			try {
 				let responseData;
-				const sessionId = this.getNodeParameter('sessionId', i) as string;
+				const sessionId = this.getNodeParameter('sessionId', i, '') as string;
 
 				if (operation === 'scrapeProfile') {
 					const url = this.getNodeParameter('url', i) as string;
+
+					const body: any = { url };
+					if (sessionId) body.sessionId = sessionId;
 
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
@@ -104,10 +107,7 @@ export class Profile implements INodeType {
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						body: {
-							sessionId,
-							url,
-						},
+						body,
 						json: true,
 						timeout: 60000, // 1 minute timeout
 					});
@@ -116,31 +116,32 @@ export class Profile implements INodeType {
 				} else if (operation === 'visitProfile') {
 					const url = this.getNodeParameter('url', i) as string;
 
+					const body: any = { url };
+					if (sessionId) body.sessionId = sessionId;
+
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
 						url: `${baseUrl}/api/profile/visit`,
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						body: {
-							sessionId,
-							url,
-						},
+						body,
 						json: true,
 						timeout: 60000, // 1 minute timeout
 					});
 
 					responseData = response;
 				} else if (operation === 'getProfileViews') {
+					const qs: any = {};
+					if (sessionId) qs.sessionId = sessionId;
+
 					const response = await this.helpers.httpRequest({
 						method: 'GET',
 						url: `${baseUrl}/api/profile/views`,
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						qs: {
-							sessionId,
-						},
+						qs,
 						json: true,
 					});
 

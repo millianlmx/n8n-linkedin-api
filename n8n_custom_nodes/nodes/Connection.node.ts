@@ -29,15 +29,6 @@ export class Connection implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'Session ID',
-				name: 'sessionId',
-				type: 'string',
-				default: '={{$json.sessionId}}',
-				required: true,
-				description: 'Session ID from LinkedIn Login node',
-				placeholder: 'Session ID from previous node',
-			},
-			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
@@ -82,6 +73,15 @@ export class Connection implements INodeType {
 				description: 'Optional message to include with the connection request (max 300 characters)',
 				placeholder: 'Hi, I would like to connect with you...',
 			},
+			// Session ID - now optional for backward compatibility
+			{
+				displayName: 'Session ID (Legacy)',
+				name: 'sessionId',
+				type: 'string',
+				default: '',
+				description: 'Optional session ID for legacy mode. Leave empty to use new singleton browser.',
+				placeholder: 'Leave empty for new mode',
+			},
 		],
 	};
 
@@ -96,24 +96,19 @@ export class Connection implements INodeType {
 		for (let i = 0; i < items.length; i++) {
 			try {
 				let responseData;
-				const sessionId = this.getNodeParameter('sessionId', i) as string;
+				const sessionId = this.getNodeParameter('sessionId', i, '') as string;
 
 				if (operation === 'sendRequest') {
 					const profileUrl = this.getNodeParameter('profileUrl', i) as string;
 					const message = this.getNodeParameter('message', i, '') as string;
 
-					const body: any = {
-						sessionId,
-						profileUrl,
-					};
-
-					if (message) {
-						body.message = message;
-					}
+					const body: any = { profileUrl };
+					if (sessionId) body.sessionId = sessionId;
+					if (message) body.message = message;
 
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
-						url: `${baseUrl}/api/connection/send-request`,
+						url: `${baseUrl}/api/connection/request`,
 						headers: {
 							'Content-Type': 'application/json',
 						},

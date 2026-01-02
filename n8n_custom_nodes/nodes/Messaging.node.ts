@@ -29,15 +29,6 @@ export class Messaging implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'Session ID',
-				name: 'sessionId',
-				type: 'string',
-				default: '={{$json.sessionId}}',
-				required: true,
-				description: 'Session ID from LinkedIn Login node',
-				placeholder: 'Session ID from previous node',
-			},
-			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
@@ -72,6 +63,18 @@ export class Messaging implements INodeType {
 						value: 'getConversationUrl',
 						description: 'Get conversation URL from a profile URL',
 						action: 'Get conversation URL from profile',
+					},
+					{
+						name: 'Start Monitoring',
+						value: 'startMonitoring',
+						description: 'Start message monitoring in a separate browser tab',
+						action: 'Start message monitoring',
+					},
+					{
+						name: 'Stop Monitoring',
+						value: 'stopMonitoring',
+						description: 'Stop message monitoring',
+						action: 'Stop message monitoring',
 					},
 				],
 				default: 'listConversations',
@@ -134,7 +137,7 @@ export class Messaging implements INodeType {
 			// Send Message fields
 			{
 				displayName: 'Conversation URL',
-				name: 'conversationUrl',
+				name: 'conversationUrlForSend',
 				type: 'string',
 				default: '',
 				required: true,
@@ -176,6 +179,15 @@ export class Messaging implements INodeType {
 				description: 'LinkedIn profile URL to update cache with sent message (optional but recommended for message monitoring)',
 				placeholder: 'https://www.linkedin.com/in/username/',
 			},
+			// Session ID - now optional for backward compatibility
+			{
+				displayName: 'Session ID (Legacy)',
+				name: 'sessionId',
+				type: 'string',
+				default: '',
+				description: 'Optional session ID for legacy mode. Leave empty to use new singleton browser.',
+				placeholder: 'Leave empty for new mode',
+			},
 		],
 	};
 
@@ -190,33 +202,37 @@ export class Messaging implements INodeType {
 		for (let i = 0; i < items.length; i++) {
 			try {
 				let responseData;
-				const sessionId = this.getNodeParameter('sessionId', i) as string;
+				const sessionId = this.getNodeParameter('sessionId', i, '') as string;
 
 				if (operation === 'listConversations') {
+					const qs: any = {};
+					if (sessionId) qs.sessionId = sessionId;
+
 					const response = await this.helpers.httpRequest({
 						method: 'GET',
 						url: `${baseUrl}/api/messages/conversations`,
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						qs: {
-							sessionId,
-						},
+						qs,
 						json: true,
+						timeout: 60000,
 					});
 
 					responseData = response;
 				} else if (operation === 'getUnread') {
+					const qs: any = {};
+					if (sessionId) qs.sessionId = sessionId;
+
 					const response = await this.helpers.httpRequest({
 						method: 'GET',
 						url: `${baseUrl}/api/messages/unread`,
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						qs: {
-							sessionId,
-						},
+						qs,
 						json: true,
+						timeout: 60000,
 					});
 
 					responseData = response;
@@ -225,18 +241,10 @@ export class Messaging implements INodeType {
 					const profileUrlForCache = this.getNodeParameter('profileUrlForCache', i, '') as string;
 					const forceRefresh = this.getNodeParameter('forceRefresh', i, false) as boolean;
 
-					const queryParams: any = {
-						sessionId,
-						conversationUrl,
-					};
-
-					// Add optional parameters if provided
-					if (profileUrlForCache) {
-						queryParams.profileUrl = profileUrlForCache;
-					}
-					if (forceRefresh) {
-						queryParams.forceRefresh = 'true';
-					}
+					const queryParams: any = { conversationUrl };
+					if (sessionId) queryParams.sessionId = sessionId;
+					if (profileUrlForCache) queryParams.profileUrl = profileUrlForCache;
+					if (forceRefresh) queryParams.forceRefresh = 'true';
 
 					const response = await this.helpers.httpRequest({
 						method: 'GET',
@@ -246,25 +254,21 @@ export class Messaging implements INodeType {
 						},
 						qs: queryParams,
 						json: true,
-						timeout: 60000, // 1 minute timeout
+						timeout: 60000,
 					});
 
 					responseData = response;
 				} else if (operation === 'sendMessage') {
-					const conversationUrl = this.getNodeParameter('conversationUrl', i) as string;
+					const conversationUrl = this.getNodeParameter('conversationUrlForSend', i) as string;
 					const message = this.getNodeParameter('message', i) as string;
 					const profileUrlForSend = this.getNodeParameter('profileUrlForSend', i, '') as string;
 
 					const requestBody: any = {
-						sessionId,
 						conversationUrl,
 						message,
 					};
-
-					// Add profileUrl if provided for cache update
-					if (profileUrlForSend) {
-						requestBody.profileUrl = profileUrlForSend;
-					}
+					if (sessionId) requestBody.sessionId = sessionId;
+					if (profileUrlForSend) requestBody.profileUrl = profileUrlForSend;
 
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
@@ -274,11 +278,15 @@ export class Messaging implements INodeType {
 						},
 						body: requestBody,
 						json: true,
+						timeout: 60000,
 					});
 
 					responseData = response;
 				} else if (operation === 'getConversationUrl') {
 					const profileUrl = this.getNodeParameter('profileUrl', i) as string;
+
+					const qs: any = { profileUrl };
+					if (sessionId) qs.sessionId = sessionId;
 
 					const response = await this.helpers.httpRequest({
 						method: 'GET',
@@ -286,15 +294,52 @@ export class Messaging implements INodeType {
 						headers: {
 							'Content-Type': 'application/json',
 						},
-						qs: {
-							sessionId,
-							profileUrl,
-						},
+						qs,
 						json: true,
 						timeout: 120000, // 2 minutes timeout for this operation
 					});
 
 					responseData = response;
+				} else if (operation === 'startMonitoring') {
+					const body: any = {};
+					if (sessionId) body.sessionId = sessionId;
+
+					const response = await this.helpers.httpRequest({
+						method: 'POST',
+						url: `${baseUrl}/api/messages/monitoring/start`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body,
+						json: true,
+						timeout: 30000,
+					});
+
+					responseData = {
+						success: response.success,
+						message: response.message || 'Message monitoring started',
+						timestamp: new Date().toISOString(),
+					};
+				} else if (operation === 'stopMonitoring') {
+					const body: any = {};
+					if (sessionId) body.sessionId = sessionId;
+
+					const response = await this.helpers.httpRequest({
+						method: 'POST',
+						url: `${baseUrl}/api/messages/monitoring/stop`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body,
+						json: true,
+						timeout: 30000,
+					});
+
+					responseData = {
+						success: response.success,
+						message: response.message || 'Message monitoring stopped',
+						timestamp: new Date().toISOString(),
+					};
 				}
 
 				const executionData = this.helpers.constructExecutionMetaData(
