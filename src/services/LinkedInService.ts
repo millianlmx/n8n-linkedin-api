@@ -88,12 +88,12 @@ class LinkedInService {
   }
 
   /**
-   * Ensure cookies are maintained across navigation
-   * This is especially important in containerized environments
+   * Verify cookies are still present in the browser (read-only check)
    * @param sessionId - Session identifier
+   * @returns object with cookie status and essential cookie presence
    * @private
    */
-  private async ensureCookiesPersist(sessionId: string): Promise<void> {
+  private async verifyCookiesPresent(sessionId: string): Promise<{ valid: boolean; cookieCount: number; hasLiAt: boolean }> {
     try {
       const session = SessionManager.getSession(sessionId);
       if (!session) {
@@ -103,21 +103,54 @@ class LinkedInService {
       const { browser } = session;
       const browserContext = browser.defaultBrowserContext();
       
-      // Get current cookies using browser-level API
+      // Get current cookies using browser-level API (read-only, no modification)
       const cookies = await browserContext.cookies();
       
       if (cookies.length === 0) {
         log.warn('No cookies found - session may have been lost');
-        return;
+        return { valid: false, cookieCount: 0, hasLiAt: false };
       }
       
-      // Re-set all cookies to ensure they persist
-      // This helps in containerized environments where cookies might not persist properly
-      await browserContext.setCookie(...cookies);
+      // Check for essential LinkedIn auth cookies
+      const linkedInCookies = cookies.filter(c => 
+        c.domain.includes('linkedin.com')
+      );
       
-      log.debug('Cookies re-applied for persistence', { count: cookies.length });
+      const hasLiAt = linkedInCookies.some(c => c.name === 'li_at');
+      const hasJsessionId = linkedInCookies.some(c => c.name === 'JSESSIONID');
+      
+      log.debug('Cookie verification', { 
+        totalCookies: cookies.length, 
+        linkedInCookies: linkedInCookies.length,
+        hasLiAt,
+        hasJsessionId
+      });
+      
+      // li_at is the main auth cookie - it's essential for authentication
+      const valid = hasLiAt && linkedInCookies.length > 5;
+      return { valid, cookieCount: linkedInCookies.length, hasLiAt };
     } catch (error: any) {
-      log.warn('Failed to ensure cookie persistence', error);
+      log.warn('Failed to verify cookies', error);
+      return { valid: false, cookieCount: 0, hasLiAt: false };
+    }
+  }
+
+  /**
+   * Ensure cookies are maintained across navigation (DEPRECATED - use verifyCookiesPresent instead)
+   * Re-applying cookies can cause LinkedIn to invalidate the session
+   * @param sessionId - Session identifier
+   * @private
+   * @deprecated This method may cause session invalidation - kept for backwards compatibility
+   */
+  private async ensureCookiesPersist(sessionId: string): Promise<void> {
+    // NOTE: Re-applying cookies has been found to potentially cause LinkedIn
+    // to invalidate sessions. This method now only verifies cookies are present
+    // without modifying them.
+    const cookieStatus = await this.verifyCookiesPresent(sessionId);
+    if (!cookieStatus.valid) {
+      log.warn('Cookie validation failed', cookieStatus);
+    } else {
+      log.debug('Cookies verified (not re-applied)', { count: cookieStatus.cookieCount });
     }
   }
 
@@ -1100,13 +1133,20 @@ class LinkedInService {
 
       log.info('Scraping profile', { url: request.url });
 
-      // Get current cookies before navigation to ensure they're maintained
-      const browserContext = session.browser.defaultBrowserContext();
-      const cookies = await browserContext.cookies();
-      log.debug('Current cookies before navigation', { count: cookies.length });
-
-      // Ensure cookies persist before navigation (important for containers)
-      await this.ensureCookiesPersist(sessionId);
+      // Verify cookies are still present (read-only check, no modification)
+      const cookieStatus = await this.verifyCookiesPresent(sessionId);
+      log.debug('Cookie status before navigation', cookieStatus);
+      
+      if (!cookieStatus.valid) {
+        log.error('Essential cookies missing - session likely expired', cookieStatus);
+        
+        // Mark session as not authenticated
+        SessionManager.updateSession(sessionId, {
+          isAuthenticated: false,
+        });
+        
+        throw new Error('Session expired (cookies missing). Please login again.');
+      }
 
       // Navigate to profile with domcontentloaded (faster than networkidle2)
       await page.goto(request.url, {
@@ -1130,14 +1170,38 @@ class LinkedInService {
         throw new Error('Session expired. Please login again.');
       }
 
-      // Check for login form in the page content
-      const hasLoginForm = await page.evaluate(() => {
-        return !!document.querySelector('form[data-id="sign-in-form"]') ||
-               !!document.querySelector('input[type="password"][name="session_password"]');
+      // Check for login form in the page content with more detailed diagnostics
+      const pageState = await page.evaluate(() => {
+        const hasSignInForm = !!document.querySelector('form[data-id="sign-in-form"]');
+        const hasPasswordField = !!document.querySelector('input[type="password"][name="session_password"]');
+        const hasAuthWall = !!document.querySelector('.authwall-join-form');
+        const hasProfileContent = !!document.querySelector('.scaffold-layout__main') || 
+                                  !!document.querySelector('.pv-top-card') ||
+                                  !!document.querySelector('h1');
+        const pageTitle = document.title;
+        const bodyClasses = document.body?.className || '';
+        
+        return {
+          hasSignInForm,
+          hasPasswordField,
+          hasAuthWall,
+          hasProfileContent,
+          pageTitle,
+          bodyClasses,
+          hasLoginForm: hasSignInForm || hasPasswordField || hasAuthWall
+        };
       });
 
-      if (hasLoginForm) {
-        log.error('Login form detected on page - session expired');
+      log.debug('Page state after navigation', { 
+        url: currentUrl,
+        ...pageState 
+      });
+
+      if (pageState.hasLoginForm && !pageState.hasProfileContent) {
+        log.error('Login form detected on page - session expired', { 
+          url: currentUrl,
+          pageTitle: pageState.pageTitle 
+        });
         
         // Mark session as not authenticated
         SessionManager.updateSession(sessionId, {
