@@ -2,22 +2,108 @@
 jest.mock('puppeteer', () => ({
   launch: jest.fn(),
 }));
+jest.mock('puppeteer-extra', () => ({
+  use: jest.fn(),
+  launch: jest.fn(),
+}));
+jest.mock('puppeteer-extra-plugin-stealth', () => jest.fn());
+jest.mock('@2captcha/captcha-solver', () => ({
+  Solver: jest.fn().mockImplementation(() => ({
+    recaptcha: jest.fn(),
+    hcaptcha: jest.fn(),
+  })),
+}));
 jest.mock('fs', () => ({
   existsSync: jest.fn(),
+  accessSync: jest.fn(),
 }));
+
+// Mock service modules with factory functions to ensure proper mock injection
+const mockCaptchaService = {
+  solveCaptcha: jest.fn(),
+  detectRecaptcha: jest.fn().mockResolvedValue(false),
+  isAvailable: jest.fn().mockReturnValue(false),
+  extractSiteKey: jest.fn().mockResolvedValue(null),
+  solveWithClicks: jest.fn().mockResolvedValue(false),
+  handleRecaptchaChallenge: jest.fn().mockResolvedValue(false),
+};
+
+const mockSessionManager = {
+  getSession: jest.fn(),
+  updateSession: jest.fn(),
+};
+
+const mockLinkedInBrowser = {
+  isReady: jest.fn(),
+  isAuthenticated: jest.fn(),
+  getOperationPage: jest.fn(),
+  getMonitoringPage: jest.fn(),
+  getBrowser: jest.fn(),
+  setAuthenticated: jest.fn(),
+  setUserIdentifier: jest.fn(),
+  initialize: jest.fn(),
+  saveState: jest.fn(),
+  getOrCreateMonitoringPage: jest.fn(),
+  focusOperationPage: jest.fn(),
+  focusMonitoringPage: jest.fn(),
+  getLinkedInCookies: jest.fn(),
+  closeMonitoringPage: jest.fn(),
+  getStatus: jest.fn(),
+};
+
+const mockBrowserStateService = {
+  hasBrowserState: jest.fn(),
+  restoreBrowserState: jest.fn(),
+  saveBrowserState: jest.fn(),
+  verifySession: jest.fn(),
+  deleteBrowserState: jest.fn(),
+};
+
 jest.mock('../../src/services/SessionManager', () => ({
-  default: {
-    getSession: jest.fn(),
-    updateSession: jest.fn(),
-  },
+  default: mockSessionManager,
+  __esModule: true,
+}));
+jest.mock('../../src/services/LinkedInBrowser', () => ({
+  default: mockLinkedInBrowser,
+  __esModule: true,
 }));
 jest.mock('../../src/services/CacheService');
+jest.mock('../../src/services/BrowserStateService', () => ({
+  default: mockBrowserStateService,
+  __esModule: true,
+}));
+jest.mock('../../src/services/CaptchaService', () => ({
+  default: mockCaptchaService,
+  __esModule: true,
+}));
 
 import LinkedInService from '../../src/services/LinkedInService';
-import SessionManager from '../../src/services/SessionManager';
 import { CacheService } from '../../src/services/CacheService';
 import * as puppeteer from 'puppeteer';
 import { existsSync } from 'fs';
+
+// Use the module-level mock objects directly
+const mockedLinkedInBrowser = mockLinkedInBrowser as {
+  isReady: jest.Mock;
+  isAuthenticated: jest.Mock;
+  getOperationPage: jest.Mock;
+  getMonitoringPage: jest.Mock;
+  getBrowser: jest.Mock;
+  setAuthenticated: jest.Mock;
+  setUserIdentifier: jest.Mock;
+  initialize: jest.Mock;
+  saveState: jest.Mock;
+  getOrCreateMonitoringPage: jest.Mock;
+  focusOperationPage: jest.Mock;
+  focusMonitoringPage: jest.Mock;
+  getLinkedInCookies: jest.Mock;
+  closeMonitoringPage: jest.Mock;
+  getStatus: jest.Mock;
+};
+const mockedSessionManager = mockSessionManager as {
+  getSession: jest.Mock;
+  updateSession: jest.Mock;
+};
 
 describe('LinkedInService', () => {
   let linkedInService: typeof LinkedInService;
@@ -43,15 +129,32 @@ describe('LinkedInService', () => {
       evaluate: jest.fn().mockResolvedValue({}),
       $: jest.fn().mockResolvedValue(null),
       $$: jest.fn().mockResolvedValue([]),
+      cookies: jest.fn().mockResolvedValue([
+        { name: 'li_at', value: 'test', domain: '.linkedin.com' },
+        { name: 'JSESSIONID', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie1', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie2', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie3', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie4', value: 'test', domain: '.linkedin.com' },
+      ]),
+      bringToFront: jest.fn().mockResolvedValue(undefined),
+      mouse: { move: jest.fn().mockResolvedValue(undefined) },
+      on: jest.fn(),
+      target: jest.fn().mockReturnValue({
+        createCDPSession: jest.fn().mockResolvedValue({
+          send: jest.fn().mockResolvedValue(undefined),
+        }),
+      }),
     };
 
     // Create mock browser
     mockBrowser = {
       newPage: jest.fn().mockResolvedValue(mockPage),
       close: jest.fn().mockResolvedValue(undefined),
+      pages: jest.fn().mockResolvedValue([mockPage]),
     };
 
-    // Create mock session
+    // Create mock session (for legacy fallback tests)
     mockSession = {
       id: 'test-session-id',
       browser: mockBrowser,
@@ -64,14 +167,29 @@ describe('LinkedInService', () => {
     // Mock puppeteer.launch
     (puppeteer.launch as jest.Mock).mockResolvedValue(mockBrowser);
 
-    // Mock SessionManager
-    SessionManager.getSession = jest.fn().mockReturnValue(mockSession);
-    SessionManager.updateSession = jest.fn().mockImplementation(() => {});
+    // Mock SessionManager (legacy fallback)
+    mockedSessionManager.getSession.mockReturnValue(mockSession);
+    mockedSessionManager.updateSession.mockImplementation(() => {});
+
+    // Mock LinkedInBrowser (new system - USE_NEW_BROWSER = true)
+    mockedLinkedInBrowser.isReady.mockReturnValue(true);
+    mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
+    mockedLinkedInBrowser.getOperationPage.mockReturnValue(mockPage);
+    mockedLinkedInBrowser.getMonitoringPage.mockReturnValue(null);
+    mockedLinkedInBrowser.getBrowser.mockReturnValue(mockBrowser);
+    mockedLinkedInBrowser.initialize.mockResolvedValue({ sessionRestored: false, isAuthenticated: false });
+    mockedLinkedInBrowser.getLinkedInCookies.mockResolvedValue({ valid: true, hasLiAt: true, cookieCount: 6, cookies: [] });
+    mockedLinkedInBrowser.getOrCreateMonitoringPage.mockResolvedValue(mockPage);
+    mockedLinkedInBrowser.focusOperationPage.mockResolvedValue(undefined);
+    mockedLinkedInBrowser.focusMonitoringPage.mockResolvedValue(undefined);
+    mockedLinkedInBrowser.saveState.mockResolvedValue(undefined);
 
     // Mock CacheService
     mockCacheService = {
       getProfile: jest.fn().mockResolvedValue(null),
       cacheProfile: jest.fn().mockResolvedValue(undefined),
+      getConversation: jest.fn().mockResolvedValue(null),
+      cacheConversation: jest.fn().mockResolvedValue(undefined),
     };
     (CacheService as jest.MockedClass<typeof CacheService>).mockImplementation(() => mockCacheService as any);
 
@@ -107,35 +225,45 @@ describe('LinkedInService', () => {
   });
 
   describe('initializeBrowser', () => {
-    it('should initialize browser successfully', async () => {
+    it('should initialize browser successfully using LinkedInBrowser', async () => {
+      // Setup
+      mockedLinkedInBrowser.initialize.mockResolvedValue({ 
+        sessionRestored: false, 
+        isAuthenticated: false 
+      });
+
       // Execution
       const result = await linkedInService.initializeBrowser();
 
       // Assertion
-      expect(result).toEqual({ browser: mockBrowser, page: mockPage });
-      expect(puppeteer.launch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          headless: true,
-          args: expect.arrayContaining(['--no-sandbox']),
-        })
-      );
-      expect(mockPage.setUserAgent).toHaveBeenCalled();
+      expect(result).toMatchObject({ 
+        browser: mockBrowser, 
+        page: mockPage,
+        sessionRestored: false,
+        isAuthenticated: false
+      });
+      expect(mockedLinkedInBrowser.initialize).toHaveBeenCalled();
     });
 
-    it('should use custom Chrome path when found', async () => {
+    it('should restore session when available', async () => {
       // Setup
-      (existsSync as jest.Mock).mockReturnValue(true);
+      mockedLinkedInBrowser.initialize.mockResolvedValue({ 
+        sessionRestored: true, 
+        isAuthenticated: true 
+      });
 
       // Execution
-      await linkedInService.initializeBrowser();
+      const result = await linkedInService.initializeBrowser('test@example.com');
 
       // Assertion
-      expect(puppeteer.launch).toHaveBeenCalled();
+      expect(result.sessionRestored).toBe(true);
+      expect(result.isAuthenticated).toBe(true);
+      expect(mockedLinkedInBrowser.initialize).toHaveBeenCalledWith('test@example.com');
     });
 
     it('should handle browser initialization errors', async () => {
       // Setup
-      (puppeteer.launch as jest.Mock).mockRejectedValue(new Error('Launch failed'));
+      mockedLinkedInBrowser.initialize.mockRejectedValue(new Error('Launch failed'));
 
       // Execution & Assertion
       await expect(linkedInService.initializeBrowser()).rejects.toThrow('Failed to initialize browser');
@@ -143,14 +271,19 @@ describe('LinkedInService', () => {
   });
 
   describe('login', () => {
-    it('should throw error when session not found', async () => {
+    beforeEach(() => {
+      // Reset to unauthenticated state for login tests
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
+    });
+
+    it('should throw error when browser not initialized', async () => {
       // Setup
-      SessionManager.getSession = jest.fn().mockReturnValue(undefined);
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
-        linkedInService.login('invalid-session', { email: 'test@example.com', password: 'password' })
-      ).rejects.toThrow('Session not found');
+        linkedInService.login('test-session-id', { email: 'test@example.com', password: 'password' })
+      ).rejects.toThrow('Browser not initialized');
     });
 
     it('should throw error when email is missing', async () => {
@@ -209,7 +342,7 @@ describe('LinkedInService', () => {
       expect(mockPage.waitForNavigation).toHaveBeenCalled();
     });
 
-    it('should update session as authenticated on successful login to feed', async () => {
+    it('should set authenticated on successful login to feed', async () => {
       // Setup
       mockPage.url.mockReturnValue('https://www.linkedin.com/feed');
 
@@ -217,10 +350,7 @@ describe('LinkedInService', () => {
       const result = await linkedInService.login('test-session-id', { email: 'test@example.com', password: 'password' });
 
       // Assertion
-      expect(SessionManager.updateSession).toHaveBeenCalledWith(
-        'test-session-id',
-        { isAuthenticated: true }
-      );
+      expect(mockedLinkedInBrowser.setAuthenticated).toHaveBeenCalledWith(true);
       expect(result).toMatchObject({
         success: true,
         message: 'Login successful'
@@ -236,7 +366,7 @@ describe('LinkedInService', () => {
 
       // Assertion
       expect(result.success).toBe(true);
-      expect(SessionManager.updateSession).toHaveBeenCalled();
+      expect(mockedLinkedInBrowser.setAuthenticated).toHaveBeenCalledWith(true);
     });
 
     it('should handle redirect to mynetwork as successful login', async () => {
@@ -295,10 +425,19 @@ describe('LinkedInService', () => {
   });
 
   describe('scrapeProfile', () => {
+    it('should throw error when browser not ready', async () => {
+      // Setup
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
+
+      // Execution & Assertion
+      await expect(
+        linkedInService.scrapeProfile('test-session-id', { url: 'https://linkedin.com/in/test' })
+      ).rejects.toThrow('Browser not initialized');
+    });
+
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -393,8 +532,7 @@ describe('LinkedInService', () => {
   describe('listConversations', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -465,8 +603,7 @@ describe('LinkedInService', () => {
   describe('getUnreadMessages', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      SessionManager.getSession = jest.fn().mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -519,8 +656,7 @@ describe('LinkedInService', () => {
   describe('readConversation', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -583,8 +719,7 @@ describe('LinkedInService', () => {
   describe('sendMessage', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      SessionManager.getSession = jest.fn().mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -652,8 +787,7 @@ describe('LinkedInService', () => {
   describe('visitProfile', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -709,8 +843,7 @@ describe('LinkedInService', () => {
   describe('sendConnectionRequest', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -721,7 +854,12 @@ describe('LinkedInService', () => {
     it('should navigate to profile URL', async () => {
       // Setup
       const profileUrl = 'https://linkedin.com/in/test';
-      mockPage.evaluate.mockResolvedValue(true);
+      mockPage.evaluate
+        .mockResolvedValueOnce('2nd') // Connection degree
+        .mockResolvedValueOnce({ uiType: 'direct', hasConnectButton: true }) // connectionCheck
+        .mockResolvedValueOnce(true) // Click connect
+        .mockResolvedValueOnce(false) // No add note
+        .mockResolvedValueOnce(true); // Send invitation
 
       // Execution
       await linkedInService.sendConnectionRequest('test-session-id', profileUrl);
@@ -733,7 +871,12 @@ describe('LinkedInService', () => {
     it('should send connection request without message', async () => {
       // Setup
       const profileUrl = 'https://linkedin.com/in/test';
-      mockPage.evaluate.mockResolvedValue(true);
+      mockPage.evaluate
+        .mockResolvedValueOnce('2nd') // Connection degree
+        .mockResolvedValueOnce({ uiType: 'direct', hasConnectButton: true }) // connectionCheck
+        .mockResolvedValueOnce(true) // Click connect
+        .mockResolvedValueOnce(false) // No add note
+        .mockResolvedValueOnce(true); // Send invitation
 
       // Execution
       const result = await linkedInService.sendConnectionRequest('test-session-id', profileUrl);
@@ -747,7 +890,14 @@ describe('LinkedInService', () => {
       // Setup
       const profileUrl = 'https://linkedin.com/in/test';
       const message = 'Hello, let\'s connect!';
-      mockPage.evaluate.mockResolvedValue(true);
+      mockPage.evaluate
+        .mockResolvedValueOnce('2nd') // Connection degree
+        .mockResolvedValueOnce({ uiType: 'direct', hasConnectButton: true }) // connectionCheck
+        .mockResolvedValueOnce(true) // Click connect
+        .mockResolvedValueOnce(true) // Has add note button
+        .mockResolvedValueOnce(true) // Click add note
+        .mockResolvedValueOnce(true) // Type message
+        .mockResolvedValueOnce(true); // Send
 
       // Execution
       const result = await linkedInService.sendConnectionRequest('test-session-id', profileUrl, message);
@@ -758,7 +908,12 @@ describe('LinkedInService', () => {
 
     it('should wait for connect button', async () => {
       // Setup
-      mockPage.evaluate.mockResolvedValue(true);
+      mockPage.evaluate
+        .mockResolvedValueOnce('2nd') // Connection degree
+        .mockResolvedValueOnce({ uiType: 'direct', hasConnectButton: true }) // connectionCheck
+        .mockResolvedValueOnce(true) // Click connect
+        .mockResolvedValueOnce(false) // No add note
+        .mockResolvedValueOnce(true); // Send invitation
 
       // Execution
       await linkedInService.sendConnectionRequest('test-session-id', 'https://linkedin.com/in/test');
@@ -781,8 +936,7 @@ describe('LinkedInService', () => {
   describe('getProfileViews', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -845,8 +999,7 @@ describe('LinkedInService', () => {
   describe('searchPeople', () => {
     it('should throw error when not authenticated', async () => {
       // Setup
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
 
       // Execution & Assertion
       await expect(
@@ -933,6 +1086,20 @@ describe('LinkedInService', () => {
     });
   });
 
+  describe('stopMessageMonitoring', () => {
+    it('should stop monitoring using LinkedInBrowser', async () => {
+      // Setup
+      mockedLinkedInBrowser.closeMonitoringPage.mockResolvedValue(undefined);
+
+      // Execution
+      const result = await linkedInService.stopMessageMonitoring('test-session-id');
+
+      // Assertion
+      expect(result.success).toBe(true);
+      expect(mockedLinkedInBrowser.closeMonitoringPage).toHaveBeenCalled();
+    });
+  });
+
   describe('error handling', () => {
     it('should handle page navigation errors', async () => {
       // Setup
@@ -957,8 +1124,8 @@ describe('LinkedInService', () => {
 
   describe('scrapeProfile - comprehensive DOM extraction', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
       mockCacheService.getProfile.mockResolvedValue(null);
     });
 
@@ -1029,8 +1196,8 @@ describe('LinkedInService', () => {
 
   describe('listConversations - comprehensive scenarios', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
     });
 
     it('should handle empty conversation list', async () => {
@@ -1068,8 +1235,8 @@ describe('LinkedInService', () => {
 
   describe('sendMessage - comprehensive flow', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
     });
 
     it('should send message with primary button selector', async () => {
@@ -1124,14 +1291,15 @@ describe('LinkedInService', () => {
 
   describe('sendConnectionRequest - comprehensive flow', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
     });
 
     it('should send connection without note', async () => {
       mockPage.evaluate
-        .mockResolvedValueOnce(true) // Connection degree check
-        .mockResolvedValueOnce(true) // Click connect
+        .mockResolvedValueOnce('2nd') // Connection degree check - not 1st degree
+        .mockResolvedValueOnce({ uiType: 'direct', hasConnectButton: true }) // connectionCheck
+        .mockResolvedValueOnce(true) // Click connect button
         .mockResolvedValueOnce(false) // No add note button
         .mockResolvedValueOnce(true); // Send invitation
 
@@ -1145,7 +1313,8 @@ describe('LinkedInService', () => {
 
     it('should send connection with custom note', async () => {
       mockPage.evaluate
-        .mockResolvedValueOnce(true) // Connection degree
+        .mockResolvedValueOnce('2nd') // Connection degree - not 1st
+        .mockResolvedValueOnce({ uiType: 'direct', hasConnectButton: true }) // connectionCheck
         .mockResolvedValueOnce(true) // Click connect
         .mockResolvedValueOnce(true) // Has add note button
         .mockResolvedValueOnce(true) // Click add note
@@ -1163,19 +1332,20 @@ describe('LinkedInService', () => {
 
     it('should handle connect button not found', async () => {
       mockPage.evaluate
-        .mockResolvedValueOnce(true) // Connection degree check passes
-        .mockResolvedValueOnce(false); // Connect button not found
+        .mockResolvedValueOnce('2nd') // Connection degree check passes
+        .mockResolvedValueOnce({ uiType: 'none', hasConnectButton: false }); // Connect button not found
 
       const result = await linkedInService.sendConnectionRequest('test-session-id', 'https://linkedin.com/in/test');
       
       expect(result.success).toBe(false);
-      expect(result.message).toBe('Connect button not found');
+      expect(result.message).toBe('Connection request already sent or not available');
     });
 
     it('should handle send invitation failure', async () => {
       mockPage.evaluate
-        .mockResolvedValueOnce(true) // Connection degree
-        .mockResolvedValueOnce(true) // Click connect
+        .mockResolvedValueOnce('2nd') // Connection degree
+        .mockResolvedValueOnce({ uiType: 'direct', hasConnectButton: true }) // connectionCheck
+        .mockResolvedValueOnce(true) // Click connect succeeds
         .mockResolvedValueOnce(false) // No add note
         .mockResolvedValueOnce(false); // Send fails
 
@@ -1188,8 +1358,8 @@ describe('LinkedInService', () => {
 
   describe('getProfileViews - comprehensive', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
     });
 
     it('should extract profile views data', async () => {
@@ -1219,8 +1389,8 @@ describe('LinkedInService', () => {
 
   describe('searchPeople - comprehensive', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
     });
 
     it('should search with custom limit', async () => {
@@ -1258,8 +1428,8 @@ describe('LinkedInService', () => {
 
   describe('readConversation - comprehensive', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
     });
 
     it('should read conversation with multiple messages', async () => {
@@ -1295,8 +1465,8 @@ describe('LinkedInService', () => {
 
   describe('visitProfile - comprehensive', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = true;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(true);
     });
 
     it('should visit profile successfully', async () => {
@@ -1339,8 +1509,8 @@ describe('LinkedInService', () => {
 
   describe('login - additional redirect scenarios', () => {
     beforeEach(() => {
-      mockSession.isAuthenticated = false;
-      (SessionManager.getSession as jest.Mock).mockReturnValue(mockSession);
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.isAuthenticated.mockReturnValue(false);
     });
 
     it('should handle redirect to /jobs', async () => {
