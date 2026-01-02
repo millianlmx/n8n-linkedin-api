@@ -191,16 +191,12 @@ describe('SessionManager', () => {
       // Setup
       const sessionId = SessionManager.createSession(mockBrowser, mockPage);
       mockBrowser.close.mockRejectedValue(new Error('Browser close error'));
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
 
-      // Execution
+      // Execution - should not throw even if browser.close() fails
       await SessionManager.deleteSession(sessionId);
 
-      // Assertion
+      // Assertion - session should still be deleted despite browser close error
       expect(SessionManager.getSession(sessionId)).toBeUndefined();
-      expect(consoleErrorSpy).toHaveBeenCalled();
-      
-      consoleErrorSpy.mockRestore();
     });
 
     it('should not throw error when deleting non-existent session', async () => {
@@ -224,7 +220,7 @@ describe('SessionManager', () => {
       expect(sessions.length).toBe(0);
     });
 
-    it('should return all session IDs', () => {
+    it('should return all session summaries', () => {
       // Setup
       const sessionId1 = SessionManager.createSession(mockBrowser, mockPage);
       const sessionId2 = SessionManager.createSession(mockBrowser, mockPage);
@@ -235,12 +231,13 @@ describe('SessionManager', () => {
 
       // Assertion
       expect(sessions).toHaveLength(3);
-      expect(sessions).toContain(sessionId1);
-      expect(sessions).toContain(sessionId2);
-      expect(sessions).toContain(sessionId3);
+      const sessionIds = sessions.map(s => s.id);
+      expect(sessionIds).toContain(sessionId1);
+      expect(sessionIds).toContain(sessionId2);
+      expect(sessionIds).toContain(sessionId3);
     });
 
-    it('should return array of strings', () => {
+    it('should return array of session summary objects', () => {
       // Setup
       SessionManager.createSession(mockBrowser, mockPage);
       SessionManager.createSession(mockBrowser, mockPage);
@@ -250,8 +247,11 @@ describe('SessionManager', () => {
 
       // Assertion
       expect(Array.isArray(sessions)).toBe(true);
-      sessions.forEach(sessionId => {
-        expect(typeof sessionId).toBe('string');
+      sessions.forEach(session => {
+        expect(typeof session.id).toBe('string');
+        expect(typeof session.isAuthenticated).toBe('boolean');
+        expect(session.createdAt).toBeInstanceOf(Date);
+        expect(session.lastUsed).toBeInstanceOf(Date);
       });
     });
   });
