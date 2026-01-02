@@ -100,11 +100,14 @@ class LinkedInService {
         throw new Error('Session not found');
       }
 
-      const { browser } = session;
-      const browserContext = browser.defaultBrowserContext();
+      const { page } = session;
       
-      // Get current cookies using browser-level API (read-only, no modification)
-      const cookies = await browserContext.cookies();
+      // IMPORTANT: Use page.cookies() with LinkedIn URLs to get ALL cookies for those domains
+      // This ensures we get li_at cookie even if current page URL doesn't match the cookie domain
+      const cookies = await page.cookies(
+        'https://www.linkedin.com',
+        'https://linkedin.com'
+      );
       
       if (cookies.length === 0) {
         log.warn('No cookies found - session may have been lost');
