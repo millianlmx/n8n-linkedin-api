@@ -1,9 +1,31 @@
 import { Router, Request, Response } from 'express';
 import LinkedInService from '../services/LinkedInService';
+import SessionManager from '../services/SessionManager';
 import { createServiceLogger } from '../utils/logger';
 
 const router = Router();
 const log = createServiceLogger('ProfileRoutes');
+
+/**
+ * Validates UUID format
+ */
+function isValidUUID(str: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
+/**
+ * Validates LinkedIn profile URL format
+ */
+function isValidLinkedInUrl(url: string): boolean {
+  if (typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.includes('linkedin.com') && parsed.pathname.includes('/in/');
+  } catch {
+    return false;
+  }
+}
 
 /**
  * POST /api/profile/scrape
@@ -16,18 +38,104 @@ router.post('/scrape', async (req: Request, res: Response) => {
   
   log.info('Profile scrape request received', { 
     requestId,
-    sessionId: req.body.sessionId ? `${req.body.sessionId.substring(0, 8)}...` : 'missing',
-    url: req.body.url || 'missing'
+    body: JSON.stringify(req.body),
   });
 
   try {
     const { sessionId, url } = req.body;
 
-    if (!sessionId || !url) {
-      log.warn('Missing required parameters', { requestId, hasSessionId: !!sessionId, hasUrl: !!url });
+    // Validate sessionId
+    if (!sessionId) {
+      log.warn('Missing sessionId', { requestId });
       return res.status(400).json({
         success: false,
-        message: 'Session ID and profile URL are required',
+        message: 'Session ID is required',
+        requestId,
+      });
+    }
+
+    if (typeof sessionId !== 'string') {
+      log.warn('Invalid sessionId type', { requestId, type: typeof sessionId, value: String(sessionId) });
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID must be a string',
+        requestId,
+      });
+    }
+
+    if (!isValidUUID(sessionId)) {
+      log.warn('Invalid sessionId format', { requestId, sessionId });
+      
+      // List available sessions to help debug
+      const availableSessions = SessionManager.getAllSessions();
+      log.info('Available sessions', { 
+        requestId, 
+        count: availableSessions.length,
+        sessionIds: availableSessions.map(s => s.id)
+      });
+      
+      return res.status(400).json({
+        success: false,
+        message: `Invalid Session ID format. Expected UUID, got: "${sessionId}". Use GET /api/auth/sessions to get valid session IDs.`,
+        requestId,
+        availableSessions: availableSessions.map(s => ({ id: s.id, isAuthenticated: s.isAuthenticated })),
+      });
+    }
+
+    // Validate URL
+    if (!url) {
+      log.warn('Missing URL', { requestId });
+      return res.status(400).json({
+        success: false,
+        message: 'Profile URL is required',
+        requestId,
+      });
+    }
+
+    if (typeof url !== 'string') {
+      log.warn('Invalid URL type', { requestId, type: typeof url, value: JSON.stringify(url) });
+      return res.status(400).json({
+        success: false,
+        message: `URL must be a string, got ${typeof url}: ${JSON.stringify(url)}`,
+        requestId,
+      });
+    }
+
+    if (!isValidLinkedInUrl(url)) {
+      log.warn('Invalid LinkedIn URL', { requestId, url });
+      return res.status(400).json({
+        success: false,
+        message: `Invalid LinkedIn profile URL: "${url}". URL must be a valid LinkedIn profile URL (e.g., https://www.linkedin.com/in/username/)`,
+        requestId,
+      });
+    }
+
+    // Check if session exists before calling the service
+    const session = SessionManager.getSession(sessionId);
+    if (!session) {
+      log.warn('Session not found', { requestId, sessionId });
+      
+      const availableSessions = SessionManager.getAllSessions();
+      log.info('Available sessions', { 
+        requestId, 
+        count: availableSessions.length,
+        sessionIds: availableSessions.map(s => s.id)
+      });
+      
+      return res.status(404).json({
+        success: false,
+        message: `Session not found: ${sessionId}. Use GET /api/auth/sessions to get valid session IDs.`,
+        requestId,
+        availableSessions: availableSessions.map(s => ({ id: s.id, isAuthenticated: s.isAuthenticated })),
+      });
+    }
+
+    if (!session.isAuthenticated) {
+      log.warn('Session not authenticated', { requestId, sessionId });
+      return res.status(401).json({
+        success: false,
+        message: 'Session is not authenticated. Please login first using POST /api/auth/login',
+        requestId,
       });
     }
 
@@ -49,7 +157,6 @@ router.post('/scrape', async (req: Request, res: Response) => {
       requestId, 
       duration: `${duration}ms`,
       errorMessage: error.message,
-      errorStack: error.stack
     });
     
     // Determine appropriate status code based on error
@@ -79,18 +186,67 @@ router.post('/visit', async (req: Request, res: Response) => {
   
   log.info('Profile visit request received', { 
     requestId,
-    sessionId: req.body.sessionId ? `${req.body.sessionId.substring(0, 8)}...` : 'missing',
-    url: req.body.url || 'missing'
+    body: JSON.stringify(req.body),
   });
 
   try {
     const { sessionId, url } = req.body;
 
-    if (!sessionId || !url) {
-      log.warn('Missing required parameters', { requestId, hasSessionId: !!sessionId, hasUrl: !!url });
+    // Validate sessionId
+    if (!sessionId || typeof sessionId !== 'string') {
+      log.warn('Invalid sessionId', { requestId, sessionId });
       return res.status(400).json({
         success: false,
-        message: 'Session ID and profile URL are required',
+        message: 'Valid Session ID is required',
+        requestId,
+      });
+    }
+
+    if (!isValidUUID(sessionId)) {
+      const availableSessions = SessionManager.getAllSessions();
+      return res.status(400).json({
+        success: false,
+        message: `Invalid Session ID format. Use GET /api/auth/sessions to get valid session IDs.`,
+        requestId,
+        availableSessions: availableSessions.map(s => ({ id: s.id, isAuthenticated: s.isAuthenticated })),
+      });
+    }
+
+    // Validate URL
+    if (!url || typeof url !== 'string') {
+      log.warn('Invalid URL', { requestId, url: String(url) });
+      return res.status(400).json({
+        success: false,
+        message: `URL must be a valid string, got: ${typeof url}`,
+        requestId,
+      });
+    }
+
+    if (!isValidLinkedInUrl(url)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid LinkedIn profile URL: "${url}"`,
+        requestId,
+      });
+    }
+
+    // Check session exists and is authenticated
+    const session = SessionManager.getSession(sessionId);
+    if (!session) {
+      const availableSessions = SessionManager.getAllSessions();
+      return res.status(404).json({
+        success: false,
+        message: `Session not found: ${sessionId}`,
+        requestId,
+        availableSessions: availableSessions.map(s => ({ id: s.id, isAuthenticated: s.isAuthenticated })),
+      });
+    }
+
+    if (!session.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        message: 'Session is not authenticated. Please login first.',
+        requestId,
       });
     }
 
@@ -136,17 +292,48 @@ router.get('/views', async (req: Request, res: Response) => {
   
   log.info('Profile views request received', { 
     requestId,
-    sessionId: req.query.sessionId ? `${String(req.query.sessionId).substring(0, 8)}...` : 'missing'
+    query: JSON.stringify(req.query),
   });
 
   try {
     const { sessionId } = req.query;
 
     if (!sessionId || typeof sessionId !== 'string') {
-      log.warn('Missing required parameters', { requestId, hasSessionId: !!sessionId });
+      log.warn('Invalid sessionId', { requestId });
       return res.status(400).json({
         success: false,
-        message: 'Session ID is required',
+        message: 'Session ID is required as query parameter',
+        requestId,
+      });
+    }
+
+    if (!isValidUUID(sessionId)) {
+      const availableSessions = SessionManager.getAllSessions();
+      return res.status(400).json({
+        success: false,
+        message: `Invalid Session ID format. Use GET /api/auth/sessions to get valid session IDs.`,
+        requestId,
+        availableSessions: availableSessions.map(s => ({ id: s.id, isAuthenticated: s.isAuthenticated })),
+      });
+    }
+
+    // Check session exists and is authenticated
+    const session = SessionManager.getSession(sessionId);
+    if (!session) {
+      const availableSessions = SessionManager.getAllSessions();
+      return res.status(404).json({
+        success: false,
+        message: `Session not found: ${sessionId}`,
+        requestId,
+        availableSessions: availableSessions.map(s => ({ id: s.id, isAuthenticated: s.isAuthenticated })),
+      });
+    }
+
+    if (!session.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        message: 'Session is not authenticated. Please login first.',
+        requestId,
       });
     }
 
