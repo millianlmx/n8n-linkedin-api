@@ -158,3 +158,4 @@ jobs:
           portainerUrl: ${{ secrets.PORTAINER_URL }}
           accessToken: ${{ secrets.PORTAINER_ACCESS_TOKEN }}
           stackId: ${{ vars.PORTAINER_STACK_ID }}
+          endpointId: ${{ vars.PORTAINER_ENDPOINT_ID }}
