@@ -1068,16 +1068,20 @@ class LinkedInService {
     page = LinkedInBrowser.getOperationPage()!;
     log.debug('[Step 1/8] Browser validated successfully', { scrapeId, isAuthenticated: true });
 
-    // Step 2: Check cache
-    log.debug('[Step 2/8] Checking cache', { scrapeId, url: request.url });
-    const cachedProfile = await this.cacheService.getProfile(request.url);
-    if (cachedProfile) {
-      log.info('[Step 2/8] Cache hit - returning cached profile', { scrapeId, url: request.url });
-      MetricsService.trackCacheOperation('get', 'hit');
-      return { success: true, data: cachedProfile };
+    // Step 2: Check cache (skip if forceRefresh is true)
+    if (!request.forceRefresh) {
+      log.debug('[Step 2/8] Checking cache', { scrapeId, url: request.url });
+      const cachedProfile = await this.cacheService.getProfile(request.url);
+      if (cachedProfile) {
+        log.info('[Step 2/8] Cache hit - returning cached profile', { scrapeId, url: request.url });
+        MetricsService.trackCacheOperation('get', 'hit');
+        return { success: true, data: cachedProfile };
+      }
+      log.debug('[Step 2/8] Cache miss - will scrape from LinkedIn', { scrapeId });
+      MetricsService.trackCacheOperation('get', 'miss');
+    } else {
+      log.info('[Step 2/8] Force refresh enabled - skipping cache', { scrapeId, url: request.url });
     }
-    log.debug('[Step 2/8] Cache miss - will scrape from LinkedIn', { scrapeId });
-    MetricsService.trackCacheOperation('get', 'miss');
 
     try {
       // Step 3: Rate limiting

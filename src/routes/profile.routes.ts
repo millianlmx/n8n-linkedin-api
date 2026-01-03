@@ -22,7 +22,9 @@ function isValidLinkedInUrl(url: string): boolean {
 /**
  * POST /api/profile/scrape
  * Scrape a LinkedIn profile
- * Body: { url: string, sessionId?: string } (sessionId is optional - ignored for backward compatibility)
+ * Body: { url: string, sessionId?: string, forceRefresh?: boolean }
+ * - sessionId is optional (ignored - kept for backward compatibility)
+ * - forceRefresh: if true, bypass cache and scrape fresh data
  */
 router.post('/scrape', async (req: Request, res: Response) => {
   const requestId = `scrape-${Date.now()}`;
@@ -31,7 +33,7 @@ router.post('/scrape', async (req: Request, res: Response) => {
   log.info('Profile scrape request received', { requestId });
 
   try {
-    const { url } = req.body;
+    const { url, forceRefresh } = req.body;
     
     // Validate URL first
     if (!url) {
@@ -78,9 +80,9 @@ router.post('/scrape', async (req: Request, res: Response) => {
       });
     }
 
-    log.debug('Scraping profile', { requestId, url });
+    log.debug('Scraping profile', { requestId, url, forceRefresh: !!forceRefresh });
     
-    const result = await LinkedInService.scrapeProfile('unused', { url });
+    const result = await LinkedInService.scrapeProfile('unused', { url, forceRefresh: !!forceRefresh });
 
     const duration = Date.now() - startTime;
     log.info('Profile scrape completed successfully', { 

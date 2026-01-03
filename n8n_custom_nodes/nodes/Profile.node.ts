@@ -70,6 +70,19 @@ export class Profile implements INodeType {
 				description: 'The LinkedIn profile URL to scrape or visit',
 				placeholder: 'https://www.linkedin.com/in/username/',
 			},
+			// Force refresh option for scrape operation
+			{
+				displayName: 'Force Refresh',
+				name: 'forceRefresh',
+				type: 'boolean',
+				default: false,
+				displayOptions: {
+					show: {
+						operation: ['scrapeProfile'],
+					},
+				},
+				description: 'Whether to bypass cache and scrape fresh data from LinkedIn',
+			},
 			// Session ID - now optional for backward compatibility
 			{
 				displayName: 'Session ID (Legacy)',
@@ -97,8 +110,9 @@ export class Profile implements INodeType {
 
 				if (operation === 'scrapeProfile') {
 					const url = this.getNodeParameter('url', i) as string;
+					const forceRefresh = this.getNodeParameter('forceRefresh', i, false) as boolean;
 
-					const body: any = { url };
+					const body: any = { url, forceRefresh };
 					if (sessionId) body.sessionId = sessionId;
 
 					const response = await this.helpers.httpRequest({

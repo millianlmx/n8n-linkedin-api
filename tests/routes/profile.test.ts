@@ -141,7 +141,7 @@ describe('Profile API', () => {
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockProfileData });
       // Note: With USE_NEW_BROWSER=true, scrapeProfile is called with 'unused' as sessionId
-      expect(mockedLinkedInService.scrapeProfile).toHaveBeenCalledWith('unused', { url: profileUrl });
+      expect(mockedLinkedInService.scrapeProfile).toHaveBeenCalledWith('unused', { url: profileUrl, forceRefresh: false });
     });
 
     it('should scrape a profile successfully without sessionId (new system)', async () => {
@@ -158,6 +158,24 @@ describe('Profile API', () => {
       // Assertion
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockProfileData });
+      expect(mockedLinkedInService.scrapeProfile).toHaveBeenCalledWith('unused', { url: profileUrl, forceRefresh: false });
+    });
+
+    it('should scrape a profile with forceRefresh=true', async () => {
+      // Setup
+      const mockProfileData = { name: 'John Doe', title: 'Software Engineer' };
+      const profileUrl = 'https://www.linkedin.com/in/johndoe';
+      mockedLinkedInService.scrapeProfile.mockResolvedValue({ success: true, data: mockProfileData } as any);
+
+      // Execution
+      const response = await request(app)
+        .post('/api/profile/scrape')
+        .send({ url: profileUrl, forceRefresh: true });
+
+      // Assertion
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockProfileData });
+      expect(mockedLinkedInService.scrapeProfile).toHaveBeenCalledWith('unused', { url: profileUrl, forceRefresh: true });
     });
 
     it('should return 503 when browser not ready and no sessionId (new system)', async () => {

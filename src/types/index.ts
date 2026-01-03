@@ -33,6 +33,7 @@ export interface LoginResponse {
 
 export interface ProfileScrapeRequest {
   url: string;
+  forceRefresh?: boolean;
 }
 
 export interface ConnectRequest {
