@@ -10,6 +10,7 @@ on:
       - 'src/**'
       - 'package*.json'
       - 'patch-loader.js'
+      - 'n8n_custom_nodes/**'
       - '.github/workflows/docker-build.yml'
   pull_request:
     branches:

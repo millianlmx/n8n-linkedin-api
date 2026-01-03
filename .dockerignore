@@ -11,4 +11,5 @@ README.md
 coverage
 .DS_Store
 n8n_data
-n8n_custom_nodes
+n8n_custom_nodes/node_modules
+n8n_custom_nodes/dist

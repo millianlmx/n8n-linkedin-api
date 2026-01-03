@@ -1,3 +1,21 @@
+FROM n8nio/n8n:next AS builder
+
+USER root
+
+# Install build dependencies
+RUN apk add --no-cache python3 make g++
+
+# Copy n8n custom nodes source
+WORKDIR /tmp/n8n_custom_nodes
+COPY n8n_custom_nodes/package*.json ./
+COPY n8n_custom_nodes/tsconfig.json ./
+COPY n8n_custom_nodes/nodes ./nodes/
+COPY n8n_custom_nodes/credentials ./credentials/
+
+# Install dependencies and build
+RUN npm install && npm run build
+
+# Final stage
 FROM n8nio/n8n:next
 
 USER root
@@ -7,6 +25,14 @@ COPY patch-loader.js /tmp/patch-loader.js
 
 # Run the patch
 RUN node /tmp/patch-loader.js
+
+# Create custom nodes directory
+RUN mkdir -p /home/node/.n8n/custom && \
+    chown -R node:node /home/node/.n8n
+
+# Copy built custom nodes from builder stage
+COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/dist /home/node/.n8n/custom/dist
+COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/package.json /home/node/.n8n/custom/
 
 USER node
 
