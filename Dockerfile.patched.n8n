@@ -10,11 +10,6 @@ COPY n8n_custom_nodes/credentials ./credentials/
 # Install dependencies and build
 RUN npm install && npm run build
 
-# Verify build output
-RUN ls -la /tmp/n8n_custom_nodes/ && \
-    ls -la /tmp/n8n_custom_nodes/dist/ && \
-    ls -la /tmp/n8n_custom_nodes/dist/nodes/
-
 # Final stage
 FROM n8nio/n8n:next
 
@@ -26,17 +21,16 @@ COPY patch-loader.js /tmp/patch-loader.js
 # Run the patch
 RUN node /tmp/patch-loader.js
 
-# Create custom nodes directory
-RUN mkdir -p /home/node/.n8n/custom && \
-    chown -R node:node /home/node/.n8n
+# Create custom nodes directory (outside of /home/node/.n8n to avoid volume override)
+RUN mkdir -p /usr/local/lib/n8n-custom-nodes && \
+    chown -R node:node /usr/local/lib/n8n-custom-nodes
 
 # Copy built custom nodes from builder stage
-COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/dist /home/node/.n8n/custom/dist
-COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/package.json /home/node/.n8n/custom/
+COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/dist /usr/local/lib/n8n-custom-nodes/dist
+COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/package.json /usr/local/lib/n8n-custom-nodes/
 
-# Verify copy
-RUN ls -la /home/node/.n8n/custom/ && \
-    ls -la /home/node/.n8n/custom/dist/ || echo "dist folder missing"
+# Set environment variable for custom nodes location
+ENV N8N_CUSTOM_EXTENSIONS=/usr/local/lib/n8n-custom-nodes
 
 USER node
 
