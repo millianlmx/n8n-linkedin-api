@@ -1,19 +1,11 @@
-import puppeteer, { Browser, Page } from 'puppeteer';
-import SessionManager from './SessionManager';
+import { Browser, Page } from 'puppeteer';
 import LinkedInBrowser from './LinkedInBrowser';
 import { CacheService } from './CacheService';
 import CaptchaService from './CaptchaService';
-import BrowserStateService from './BrowserStateService';
 import MetricsService from './MetricsService';
 import { SendMessageRequest, LoginRequest, ProfileScrapeRequest } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
-import { MessagingDOMFunctions } from '../utils/messaging-dom-functions';
 import { createServiceLogger } from '../utils/logger';
-
-import { existsSync } from 'fs';
-
-// Flag to control whether to use new LinkedInBrowser or old SessionManager
-const USE_NEW_BROWSER = true;
 
 const log = createServiceLogger('LinkedIn');
 
@@ -38,23 +30,11 @@ class LinkedInService {
    * @private
    */
   private getPage(_sessionId?: string): Page {
-    if (USE_NEW_BROWSER) {
-      const page = LinkedInBrowser.getOperationPage();
-      if (!page) {
-        throw new Error('Browser not initialized. Call /api/auth/initialize first.');
-      }
-      return page;
-    } else {
-      // Legacy fallback
-      if (!_sessionId) {
-        throw new Error('Session ID is required');
-      }
-      const session = SessionManager.getSession(_sessionId);
-      if (!session) {
-        throw new Error('Session not found');
-      }
-      return session.page;
+    const page = LinkedInBrowser.getOperationPage();
+    if (!page) {
+      throw new Error('Browser not initialized. Call /api/auth/initialize first.');
     }
+    return page;
   }
 
   /**
@@ -64,13 +44,7 @@ class LinkedInService {
    * @private
    */
   private checkAuth(_sessionId?: string): boolean {
-    if (USE_NEW_BROWSER) {
-      return LinkedInBrowser.isAuthenticated();
-    } else {
-      if (!_sessionId) return false;
-      const session = SessionManager.getSession(_sessionId);
-      return session?.isAuthenticated ?? false;
-    }
+    return LinkedInBrowser.isAuthenticated();
   }
 
   /**
@@ -80,13 +54,7 @@ class LinkedInService {
    * @private
    */
   private setAuth(_sessionId: string | undefined, isAuthenticated: boolean): void {
-    if (USE_NEW_BROWSER) {
-      LinkedInBrowser.setAuthenticated(isAuthenticated);
-    } else {
-      if (_sessionId) {
-        SessionManager.updateSession(_sessionId, { isAuthenticated });
-      }
-    }
+    LinkedInBrowser.setAuthenticated(isAuthenticated);
   }
 
   /**
@@ -94,10 +62,7 @@ class LinkedInService {
    * @private
    */
   private getBrowserInstance(): Browser | null {
-    if (USE_NEW_BROWSER) {
-      return LinkedInBrowser.getBrowser();
-    }
-    return null;
+    return LinkedInBrowser.getBrowser();
   }
 
   /**
@@ -162,65 +127,13 @@ class LinkedInService {
 
   /**
    * Verify cookies are still present in the browser (read-only check)
-   * @param sessionId - Session identifier (deprecated, kept for backward compatibility)
+   * @param _sessionId - Session identifier (deprecated, kept for backward compatibility)
    * @returns object with cookie status and essential cookie presence
    * @private
    */
   private async verifyCookiesPresent(_sessionId?: string): Promise<{ valid: boolean; cookieCount: number; hasLiAt: boolean }> {
     try {
-      // Use new LinkedInBrowser if enabled
-      if (USE_NEW_BROWSER) {
-        return await LinkedInBrowser.getLinkedInCookies();
-      }
-
-      // Legacy fallback
-      const session = SessionManager.getSession(_sessionId!);
-      if (!session) {
-        throw new Error('Session not found');
-      }
-
-      const { page } = session;
-      
-      // IMPORTANT: Use page.cookies() with LinkedIn URLs to get ALL cookies for those domains
-      // This ensures we get li_at cookie even if current page URL doesn't match the cookie domain
-      const cookies = await page.cookies(
-        'https://www.linkedin.com',
-        'https://linkedin.com'
-      );
-      
-      if (cookies.length === 0) {
-        log.warn('No cookies found - session may have been lost');
-        return { valid: false, cookieCount: 0, hasLiAt: false };
-      }
-      
-      // Check for essential LinkedIn auth cookies
-      const linkedInCookies = cookies.filter(c => 
-        c.domain.includes('linkedin.com')
-      );
-      
-      const hasLiAt = linkedInCookies.some(c => c.name === 'li_at');
-      const hasJsessionId = linkedInCookies.some(c => c.name === 'JSESSIONID');
-      
-      // Log all LinkedIn cookie names for debugging
-      const cookieNames = linkedInCookies.map(c => c.name);
-      log.debug('Cookie verification', { 
-        totalCookies: cookies.length, 
-        linkedInCookies: linkedInCookies.length,
-        hasLiAt,
-        hasJsessionId,
-        cookieNames: cookieNames.join(', ')
-      });
-      
-      // If li_at is missing, log more details to help diagnose
-      if (!hasLiAt) {
-        log.warn('li_at cookie missing - checking all cookies for auth-related ones', {
-          allCookieNames: cookies.map(c => `${c.name}@${c.domain}`).join(', ')
-        });
-      }
-      
-      // li_at is the main auth cookie - it's essential for authentication
-      const valid = hasLiAt && linkedInCookies.length > 5;
-      return { valid, cookieCount: linkedInCookies.length, hasLiAt };
+      return await LinkedInBrowser.getLinkedInCookies();
     } catch (error: any) {
       log.warn('Failed to verify cookies', error);
       return { valid: false, cookieCount: 0, hasLiAt: false };
@@ -253,24 +166,8 @@ class LinkedInService {
    * @private
    */
   private async switchToOperationPage(_sessionId?: string): Promise<void> {
-    if (USE_NEW_BROWSER) {
-      await LinkedInBrowser.focusOperationPage();
-      await this.wait(300);
-      return;
-    }
-
-    // Legacy fallback
-    const session = SessionManager.getSession(_sessionId!);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    // If monitoring page exists, bring the operation page to front
-    if (session.monitoringPage && !session.monitoringPage.isClosed()) {
-      log.debug('Switching to operation tab', { sessionId: _sessionId });
-      await session.page.bringToFront();
-      await this.wait(300); // Small delay for tab switch
-    }
+    await LinkedInBrowser.focusOperationPage();
+    await this.wait(300);
   }
 
   /**
@@ -280,55 +177,8 @@ class LinkedInService {
    * @private
    */
   private async switchToMonitoringPage(_sessionId?: string): Promise<void> {
-    if (USE_NEW_BROWSER) {
-      await LinkedInBrowser.focusMonitoringPage();
-      await this.wait(300);
-      return;
-    }
-
-    // Legacy fallback
-    const session = SessionManager.getSession(_sessionId!);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    // If monitoring page exists, bring it back to front
-    if (session.monitoringPage && !session.monitoringPage.isClosed()) {
-      log.debug('Switching back to monitoring tab', { sessionId: _sessionId });
-      await session.monitoringPage.bringToFront();
-      await this.wait(300); // Small delay for tab switch
-    }
-  }
-
-  /**
-   * Finds the Chrome/Chromium executable path on the system
-   * @returns Path to Chrome executable or null if not found
-   * @private
-   */
-  private findChrome(): string | null {
-    const macPaths = [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Chromium.app/Contents/MacOS/Chromium',
-      '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-    ];
-
-    // Common Chrome locations on Linux
-    const linuxPaths = [
-      '/usr/bin/google-chrome',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-      '/snap/bin/chromium',
-    ];
-
-    const paths = process.platform === 'darwin' ? macPaths : linuxPaths;
-
-    for (const path of paths) {
-      if (existsSync(path)) {
-        return path;
-      }
-    }
-
-    return null;
+    await LinkedInBrowser.focusMonitoringPage();
+    await this.wait(300);
   }
 
   /**
@@ -338,135 +188,27 @@ class LinkedInService {
    */
   async initializeBrowser(userIdentifier?: string) {
     const startTime = Date.now();
-    log.info('Initializing browser', { userIdentifier, useNewBrowser: USE_NEW_BROWSER });
-
-    if (USE_NEW_BROWSER) {
-      try {
-        const result = await LinkedInBrowser.initialize(userIdentifier);
-        
-        log.info('Browser initialized via LinkedInBrowser', { 
-          sessionRestored: result.sessionRestored, 
-          isAuthenticated: result.isAuthenticated 
-        });
-        
-        MetricsService.trackBrowserLifecycle('init');
-        MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, true);
-        
-        return { 
-          browser: LinkedInBrowser.getBrowser()!, 
-          page: LinkedInBrowser.getOperationPage()!,
-          sessionRestored: result.sessionRestored,
-          isAuthenticated: result.isAuthenticated
-        };
-      } catch (error: any) {
-        log.error('Failed to initialize browser via LinkedInBrowser', error);
-        MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, false);
-        throw new Error(`Failed to initialize browser: ${error.message}`);
-      }
-    }
-
-    // Legacy fallback
-    const executablePath = this.findChrome();
-    if (executablePath) {
-      log.debug('Using Chrome executable', { path: executablePath });
-    }
+    log.info('Initializing browser', { userIdentifier });
 
     try {
-      const browser = await puppeteer.launch({
-        headless: process.env.HEADLESS ? true : false,
-        executablePath: executablePath || undefined,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-dev-shm-usage', // Overcome limited resource problems in containers
-          '--disable-gpu', // Not needed in headless mode
-          '--disable-software-rasterizer',
-          '--disable-extensions',
-          '--no-first-run',
-          // Prevent background tab throttling
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--disable-features=CalculateNativeWinOcclusion',
-          // Additional flags for better cookie/session persistence in containers
-          '--enable-features=NetworkService,NetworkServiceInProcess',
-          '--disable-features=IsolateOrigins,site-per-process',
-          '--disable-site-isolation-trials',
-        ],
-        defaultViewport: {
-          width: 1366,
-          height: 768,
-        },
+      const result = await LinkedInBrowser.initialize(userIdentifier);
+      
+      log.info('Browser initialized via LinkedInBrowser', { 
+        sessionRestored: result.sessionRestored, 
+        isAuthenticated: result.isAuthenticated 
       });
-
-      // Close the default blank page that Puppeteer creates
-      const pages = await browser.pages();
-      if (pages.length > 0) {
-        await pages[0].close();
-      }
-
-      const page = await browser.newPage();
-
-      // Forward console logs from browser to Node.js console
-      page.on('console', (msg) => {
-        const type = msg.type();
-        const text = msg.text();
-        if (type === 'log') log.debug('[Browser]', { message: text });
-      });
-
-      // Set user agent to match real browser
-      await page.setUserAgent(
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      );
-
-      // Try to restore browser state if user identifier is provided
-      if (userIdentifier) {
-        const hasState = await BrowserStateService.hasBrowserState(userIdentifier);
-        if (hasState) {
-          log.debug('Attempting to restore browser state', { userIdentifier });
-          const restored = await BrowserStateService.restoreBrowserState(userIdentifier, page);
-
-          if (restored) {
-            // Verify if the session is still valid
-            const isValid = await BrowserStateService.verifySession(page);
-
-            if (isValid) {
-              log.info('Browser state restored successfully', { userIdentifier });
-              MetricsService.trackBrowserLifecycle('init');
-              MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, true);
-              return { browser, page, sessionRestored: true, isAuthenticated: true };
-            } else {
-              log.warn('Saved session expired', { userIdentifier });
-              await BrowserStateService.deleteBrowserState(userIdentifier);
-
-              // Clear all cookies and storage to ensure a clean state
-              log.debug('Clearing cookies and storage');
-              const client = await page.target().createCDPSession();
-              await client.send('Network.clearBrowserCookies');
-              await client.send('Network.clearBrowserCache');
-
-              // Clear localStorage and sessionStorage
-              await page.evaluate(() => {
-                localStorage.clear();
-                sessionStorage.clear();
-              });
-
-              // Navigate to a blank page to reset the page state
-              // This ensures the page is in a clean state for subsequent login attempts
-              await page.goto('about:blank', { waitUntil: 'domcontentloaded' });
-              log.debug('Page reset to blank state after expired session');
-            }
-          }
-        }
-      }
-
-      log.info('Browser initialized successfully');
+      
       MetricsService.trackBrowserLifecycle('init');
       MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, true);
-      return { browser, page, sessionRestored: false };
+      
+      return { 
+        browser: LinkedInBrowser.getBrowser()!, 
+        page: LinkedInBrowser.getOperationPage()!,
+        sessionRestored: result.sessionRestored,
+        isAuthenticated: result.isAuthenticated
+      };
     } catch (error: any) {
-      log.error('Failed to initialize browser', error);
+      log.error('Failed to initialize browser via LinkedInBrowser', error);
       MetricsService.trackLinkedInOperation('browser_init', (Date.now() - startTime) / 1000, false);
       throw new Error(`Failed to initialize browser: ${error.message}`);
     }
@@ -479,27 +221,14 @@ class LinkedInService {
    * @returns Success status and redirect URL
    */
   async login(sessionId: string, credentials: LoginRequest) {
-    let page: Page;
-    let browser: Browser | null = null;
-    
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady()) {
-        throw new Error('Browser not initialized. Call /api/auth/initialize first.');
-      }
-      page = LinkedInBrowser.getOperationPage()!;
-      browser = LinkedInBrowser.getBrowser();
-    } else {
-      // Legacy fallback
-      const session = SessionManager.getSession(sessionId);
-      if (!session) {
-        throw new Error('Session not found');
-      }
-      page = session.page;
-      browser = session.browser;
+    if (!LinkedInBrowser.isReady()) {
+      throw new Error('Browser not initialized. Call /api/auth/initialize first.');
     }
+    const page = LinkedInBrowser.getOperationPage()!;
+    const browser = LinkedInBrowser.getBrowser();
 
     try {
-      log.info('Initiating LinkedIn login', { useNewBrowser: USE_NEW_BROWSER });
+      log.info('Initiating LinkedIn login');
 
       const username = credentials.email || process.env.LINKEDIN_EMAIL;
       const password = credentials.password || process.env.LINKEDIN_PASSWORD;
@@ -509,9 +238,7 @@ class LinkedInService {
       }
       
       // Store user identifier for state saving
-      if (USE_NEW_BROWSER) {
-        LinkedInBrowser.setUserIdentifier(username);
-      }
+      LinkedInBrowser.setUserIdentifier(username);
       
       await page.goto('https://www.linkedin.com/login', {
         waitUntil: 'networkidle2',
@@ -623,12 +350,7 @@ class LinkedInService {
 
         // Save browser state (cookies, localStorage, sessionStorage)
         try {
-          const userIdentifier = credentials.email || process.env.LINKEDIN_EMAIL || sessionId;
-          if (USE_NEW_BROWSER) {
-            await LinkedInBrowser.saveState();
-          } else {
-            await BrowserStateService.saveBrowserState(userIdentifier, page);
-          }
+          await LinkedInBrowser.saveState();
         } catch (saveError: any) {
           log.warn('Failed to save browser state', saveError);
         }
@@ -673,28 +395,16 @@ class LinkedInService {
    * Start message monitoring in a dedicated browser tab
    * Refreshes every 15 minutes to check for new messages
    */
-  async startMessageMonitoring(sessionId: string) {
-    let monitoringPage: Page;
-    
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-      
-      // Get or create monitoring page from LinkedInBrowser
-      monitoringPage = await LinkedInBrowser.getOrCreateMonitoringPage();
-    } else {
-      // Legacy fallback
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
-      // Create a new page for monitoring
-      monitoringPage = await session.browser.newPage();
+  async startMessageMonitoring(_sessionId: string) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
+    
+    // Get or create monitoring page from LinkedInBrowser
+    const monitoringPage = await LinkedInBrowser.getOrCreateMonitoringPage();
 
     try {
-      log.info('Starting message monitoring', { useNewBrowser: USE_NEW_BROWSER });
+      log.info('Starting message monitoring');
 
       // Forward console logs from browser to Node.js (excluding errors to reduce noise)
       monitoringPage.on('console', (msg) => {
@@ -883,12 +593,7 @@ class LinkedInService {
       // Wait for conversation list to be present
       await this.wait(2000);
 
-      // Store monitoring page reference
-      if (!USE_NEW_BROWSER) {
-        SessionManager.updateSession(sessionId, {
-          monitoringPage,
-        });
-      }
+      // Store monitoring page reference (handled by LinkedInBrowser)
 
       // Flag to prevent concurrent processing
       let isProcessing = false;
@@ -955,7 +660,7 @@ class LinkedInService {
                 }
 
                 // Open the shortened URL in a new tab to get the real profile URL
-                const browser = USE_NEW_BROWSER ? LinkedInBrowser.getBrowser() : SessionManager.getSession(sessionId)?.browser;
+                const browser = LinkedInBrowser.getBrowser();
                 if (!browser) {
                   log.warn('Browser not available for profile resolution');
                   continue;
@@ -1186,10 +891,8 @@ class LinkedInService {
         }
       }, 9 * 60 * 1000); // 9 minutes (safely under the 10-minute throttling threshold)
 
-      // Store interval in session
-      SessionManager.updateSession(sessionId, {
-        monitoringInterval,
-      });
+      // Store interval reference (handled internally by LinkedInBrowser)
+      // Note: The interval will be cleared when monitoring page is closed
 
       log.info('Message monitoring started');
       return { success: true, message: 'Message monitoring started' };
@@ -1202,46 +905,14 @@ class LinkedInService {
   /**
    * Stop message monitoring
    */
-  async stopMessageMonitoring(sessionId: string) {
-    // For new browser system, use LinkedInBrowser
-    if (USE_NEW_BROWSER) {
-      try {
-        log.info('Stopping message monitoring (new browser mode)');
-        await LinkedInBrowser.closeMonitoringPage();
-        log.info('Message monitoring stopped');
-        return { success: true, message: 'Message monitoring stopped' };
-      } catch (error: any) {
-        log.error('Failed to stop monitoring', error);
-        throw new Error(`Failed to stop monitoring: ${error.message}`);
-      }
-    }
-
-    // Legacy fallback
-    const session = SessionManager.getSession(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
+  async stopMessageMonitoring(_sessionId: string) {
     try {
-      log.info('Stopping message monitoring', { sessionId });
-
-      if (session.monitoringInterval) {
-        clearInterval(session.monitoringInterval);
-      }
-
-      if (session.monitoringPage && !session.monitoringPage.isClosed()) {
-        await session.monitoringPage.close();
-      }
-
-      SessionManager.updateSession(sessionId, {
-        monitoringPage: undefined,
-        monitoringInterval: undefined,
-      });
-
-      log.info('Message monitoring stopped', { sessionId });
+      log.info('Stopping message monitoring');
+      await LinkedInBrowser.closeMonitoringPage();
+      log.info('Message monitoring stopped');
       return { success: true, message: 'Message monitoring stopped' };
     } catch (error: any) {
-      log.error('Failed to stop monitoring', error, { sessionId });
+      log.error('Failed to stop monitoring', error);
       throw new Error(`Failed to stop monitoring: ${error.message}`);
     }
   }
@@ -1330,37 +1001,22 @@ class LinkedInService {
     const startTime = Date.now();
     const scrapeId = `scrape-${Date.now()}`;
     
-    log.info('Starting profile scrape', { scrapeId, url: request.url, useNewBrowser: USE_NEW_BROWSER });
+    log.info('Starting profile scrape', { scrapeId, url: request.url });
     
     // Step 1: Validate session/browser
     log.debug('[Step 1/8] Validating session', { scrapeId });
     
     let page: Page;
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady()) {
-        log.error('[Step 1/8] Browser not initialized', { scrapeId });
-        throw new Error('Browser not initialized. Call /api/auth/initialize first.');
-      }
-      if (!LinkedInBrowser.isAuthenticated()) {
-        log.error('[Step 1/8] Not authenticated', { scrapeId });
-        throw new Error('Not authenticated. Please login first.');
-      }
-      page = LinkedInBrowser.getOperationPage()!;
-      log.debug('[Step 1/8] Browser validated successfully', { scrapeId, isAuthenticated: true });
-    } else {
-      // Legacy fallback
-      const session = SessionManager.getSession(sessionId);
-      if (!session) {
-        log.error('[Step 1/8] Session not found', { scrapeId, sessionId: sessionId?.substring(0, 8) });
-        throw new Error('Session not found');
-      }
-      if (!session.isAuthenticated) {
-        log.error('[Step 1/8] Session not authenticated', { scrapeId, sessionId: sessionId?.substring(0, 8) });
-        throw new Error('Not authenticated');
-      }
-      page = session.page;
-      log.debug('[Step 1/8] Session validated successfully', { scrapeId, isAuthenticated: session.isAuthenticated });
+    if (!LinkedInBrowser.isReady()) {
+      log.error('[Step 1/8] Browser not initialized', { scrapeId });
+      throw new Error('Browser not initialized. Call /api/auth/initialize first.');
     }
+    if (!LinkedInBrowser.isAuthenticated()) {
+      log.error('[Step 1/8] Not authenticated', { scrapeId });
+      throw new Error('Not authenticated. Please login first.');
+    }
+    page = LinkedInBrowser.getOperationPage()!;
+    log.debug('[Step 1/8] Browser validated successfully', { scrapeId, isAuthenticated: true });
 
     // Step 2: Check cache
     log.debug('[Step 2/8] Checking cache', { scrapeId, url: request.url });
@@ -1533,23 +1189,15 @@ class LinkedInService {
     }
   }
 
-  async listConversations(sessionId: string) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async listConversations(_sessionId: string) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
-      log.info('Fetching conversations', { sessionId });
+      log.info('Fetching conversations');
 
       // Navigate to messaging
       await page.goto('https://www.linkedin.com/messaging/', {
@@ -1652,23 +1300,15 @@ class LinkedInService {
     }
   }
 
-  async getUnreadMessages(sessionId: string) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async getUnreadMessages(_sessionId: string) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
-      log.info('Getting unread messages', { sessionId });
+      log.info('Getting unread messages');
 
       // Navigate to messaging page
       await page.goto('https://www.linkedin.com/messaging/', {
@@ -1731,17 +1371,9 @@ class LinkedInService {
     }
   }
 
-  async readConversation(sessionId: string, conversationUrl: string, profileUrl?: string, forceRefresh: boolean = false) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async readConversation(_sessionId: string, conversationUrl: string, profileUrl?: string, forceRefresh: boolean = false) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
     // Check cache if profileUrl is provided and forceRefresh is false
@@ -1759,14 +1391,14 @@ class LinkedInService {
       log.debug('Force refresh enabled - fetching from LinkedIn');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
 
       // Switch to operation page
-      await this.switchToOperationPage(sessionId);
+      await this.switchToOperationPage(_sessionId);
 
       log.info('Reading conversation', { conversationUrl });
 
@@ -1866,38 +1498,30 @@ class LinkedInService {
       }
 
       // Switch back to monitoring page
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
 
       return { success: true, data: messages, cached: false, cacheUpdated };
     } catch (error: any) {
       log.error('Failed to read conversation', error);
       // Switch back to monitoring page even on error
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
       throw new Error(`Failed to read conversation: ${error.message}`);
     }
   }
 
-  async sendMessage(sessionId: string, request: SendMessageRequest) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async sendMessage(_sessionId: string, request: SendMessageRequest) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
 
       // Switch to operation page
-      await this.switchToOperationPage(sessionId);
+      await this.switchToOperationPage(_sessionId);
 
       log.info('Sending message', { conversationUrl: request.conversationUrl });
 
@@ -2070,35 +1694,27 @@ class LinkedInService {
       }
 
       // Switch back to monitoring page
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
 
       return { success: true, message: 'Message sent successfully' };
     } catch (error: any) {
       log.error('Failed to send message', error);
       // Switch back to monitoring page even on error
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
       throw new Error(`Failed to send message: ${error.message}`);
     }
   }
 
-  async visitProfile(sessionId: string, profileUrl: string) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async visitProfile(_sessionId: string, profileUrl: string) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
       // Switch to operation page
-      await this.switchToOperationPage(sessionId);
+      await this.switchToOperationPage(_sessionId);
 
       log.info('Visiting profile', { profileUrl });
 
@@ -2145,38 +1761,30 @@ class LinkedInService {
       log.info('Profile visited successfully', { profileUrl });
 
       // Switch back to monitoring page
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
 
       return { success: true, message: 'Profile visited' };
     } catch (error: any) {
       log.error('Failed to visit profile', error, { profileUrl });
       // Switch back to monitoring page even on error
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
       throw new Error(`Failed to visit profile: ${error.message}`);
     }
   }
 
-  async sendConnectionRequest(sessionId: string, profileUrl: string, message?: string) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async sendConnectionRequest(_sessionId: string, profileUrl: string, message?: string) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
       // Enforce rate limiting
       await this.enforceRateLimit();
 
       // Switch to operation page
-      await this.switchToOperationPage(sessionId);
+      await this.switchToOperationPage(_sessionId);
 
       log.info('Sending connection request', { profileUrl });
 
@@ -2446,37 +2054,29 @@ class LinkedInService {
       await this.wait(300);
 
       // Switch back to monitoring page
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
 
       return { success: true, message: 'Connection request sent' };
     } catch (error: any) {
       log.error('Failed to send connection request', error, { profileUrl });
       // Switch back to monitoring page even on error
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
       throw new Error(`Failed to send connection request: ${error.message}`);
     }
   }
 
-  async getProfileViews(sessionId: string) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async getProfileViews(_sessionId: string) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
       // Switch to operation page
-      await this.switchToOperationPage(sessionId);
+      await this.switchToOperationPage(_sessionId);
 
-      log.info('Fetching profile views', { sessionId });
+      log.info('Fetching profile views');
 
       // Navigate to own profile
       await page.goto('https://www.linkedin.com/me/', {
@@ -2492,7 +2092,7 @@ class LinkedInService {
       log.info('Profile views retrieved', { profileName: profileData.name });
 
       // Switch back to monitoring page
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
 
       return {
         success: true,
@@ -2503,25 +2103,17 @@ class LinkedInService {
     } catch (error: any) {
       log.error('Failed to get profile views', error);
       // Switch back to monitoring page even on error
-      await this.switchToMonitoringPage(sessionId);
+      await this.switchToMonitoringPage(_sessionId);
       throw new Error(`Failed to get profile views: ${error.message}`);
     }
   }
 
-  async searchPeople(sessionId: string, keywords: string, limit: number = 50) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async searchPeople(_sessionId: string, keywords: string, limit: number = 50) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
       log.info('Searching for people', { keywords, limit });
@@ -2570,20 +2162,12 @@ class LinkedInService {
     }
   }
 
-  async getConversationUrlFromProfile(sessionId: string, profileUrl: string) {
-    // Use new browser system if enabled
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
-        throw new Error('Not authenticated');
-      }
-    } else {
-      const session = SessionManager.getSession(sessionId);
-      if (!session || !session.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
+  async getConversationUrlFromProfile(_sessionId: string, profileUrl: string) {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
     }
 
-    const page = this.getPage(sessionId);
+    const page = this.getPage(_sessionId);
 
     try {
       // Enforce rate limiting
@@ -2666,7 +2250,7 @@ class LinkedInService {
         log.error('Session expired or login required', { currentUrl });
 
         // Mark session as not authenticated
-        this.setAuth(sessionId, false);
+        this.setAuth(_sessionId, false);
 
         throw new Error('Session expired. Please login again.');
       }

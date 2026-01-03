@@ -6,26 +6,15 @@ import { createServiceLogger } from '../utils/logger';
 const router = Router();
 const log = createServiceLogger('MessageRoutes');
 
-// Flag to control whether to use new LinkedInBrowser (should match LinkedInService)
-const USE_NEW_BROWSER = true;
-
 /**
  * Helper to check authentication status
  */
-function checkAuth(sessionId?: string): { ok: boolean; error?: { status: number; message: string } } {
-  if (USE_NEW_BROWSER) {
-    if (!LinkedInBrowser.isReady()) {
-      return { ok: false, error: { status: 503, message: 'Browser not initialized. Please call POST /api/auth/initialize first.' } };
-    }
-    if (!LinkedInBrowser.isAuthenticated()) {
-      return { ok: false, error: { status: 401, message: 'Not authenticated. Please call POST /api/auth/login first.' } };
-    }
-    return { ok: true };
+function checkAuth(): { ok: boolean; error?: { status: number; message: string } } {
+  if (!LinkedInBrowser.isReady()) {
+    return { ok: false, error: { status: 503, message: 'Browser not initialized. Please call POST /api/auth/initialize first.' } };
   }
-  
-  // Legacy mode
-  if (!sessionId) {
-    return { ok: false, error: { status: 400, message: 'Session ID is required' } };
+  if (!LinkedInBrowser.isAuthenticated()) {
+    return { ok: false, error: { status: 401, message: 'Not authenticated. Please call POST /api/auth/login first.' } };
   }
   return { ok: true };
 }
@@ -33,13 +22,11 @@ function checkAuth(sessionId?: string): { ok: boolean; error?: { status: number;
 /**
  * POST /api/messages/monitoring/start
  * Start message monitoring for a session
- * Body: { sessionId?: string } - sessionId is optional when using new browser system
+ * Body: { sessionId?: string } - sessionId is optional (ignored - kept for backward compatibility)
  */
-router.post('/monitoring/start', async (req: Request, res: Response) => {
+router.post('/monitoring/start', async (_req: Request, res: Response) => {
   try {
-    const { sessionId } = req.body;
-    
-    const authCheck = checkAuth(sessionId);
+    const authCheck = checkAuth();
     if (!authCheck.ok) {
       return res.status(authCheck.error!.status).json({
         success: false,
@@ -47,7 +34,7 @@ router.post('/monitoring/start', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.startMessageMonitoring(sessionId || 'unused');
+    const result = await LinkedInService.startMessageMonitoring('unused');
     res.json(result);
   } catch (error: any) {
     log.error('Start monitoring failed', error);
@@ -61,13 +48,11 @@ router.post('/monitoring/start', async (req: Request, res: Response) => {
 /**
  * POST /api/messages/monitoring/stop
  * Stop message monitoring for a session
- * Body: { sessionId?: string } - sessionId is optional when using new browser system
+ * Body: { sessionId?: string } - sessionId is optional (ignored - kept for backward compatibility)
  */
-router.post('/monitoring/stop', async (req: Request, res: Response) => {
+router.post('/monitoring/stop', async (_req: Request, res: Response) => {
   try {
-    const { sessionId } = req.body;
-
-    const authCheck = checkAuth(sessionId);
+    const authCheck = checkAuth();
     if (!authCheck.ok) {
       return res.status(authCheck.error!.status).json({
         success: false,
@@ -75,7 +60,7 @@ router.post('/monitoring/stop', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.stopMessageMonitoring(sessionId || 'unused');
+    const result = await LinkedInService.stopMessageMonitoring('unused');
     res.json(result);
   } catch (error: any) {
     log.error('Stop monitoring failed', error);
@@ -89,13 +74,11 @@ router.post('/monitoring/stop', async (req: Request, res: Response) => {
 /**
  * GET /api/messages/conversations
  * List all conversations
- * Query: sessionId (optional when using new browser system)
+ * Query: sessionId (optional - ignored for backward compatibility)
  */
-router.get('/conversations', async (req: Request, res: Response) => {
+router.get('/conversations', async (_req: Request, res: Response) => {
   try {
-    const sessionId = req.query.sessionId as string | undefined;
-
-    const authCheck = checkAuth(sessionId);
+    const authCheck = checkAuth();
     if (!authCheck.ok) {
       return res.status(authCheck.error!.status).json({
         success: false,
@@ -103,7 +86,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.listConversations(sessionId || 'unused');
+    const result = await LinkedInService.listConversations('unused');
 
     res.json(result);
   } catch (error: any) {
@@ -118,13 +101,11 @@ router.get('/conversations', async (req: Request, res: Response) => {
 /**
  * GET /api/messages/unread
  * Get all unread/new messages
- * Query: sessionId (optional when using new browser system)
+ * Query: sessionId (optional - ignored for backward compatibility)
  */
-router.get('/unread', async (req: Request, res: Response) => {
+router.get('/unread', async (_req: Request, res: Response) => {
   try {
-    const sessionId = req.query.sessionId as string | undefined;
-
-    const authCheck = checkAuth(sessionId);
+    const authCheck = checkAuth();
     if (!authCheck.ok) {
       return res.status(authCheck.error!.status).json({
         success: false,
@@ -132,7 +113,7 @@ router.get('/unread', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.getUnreadMessages(sessionId || 'unused');
+    const result = await LinkedInService.getUnreadMessages('unused');
 
     res.json(result);
   } catch (error: any) {
@@ -151,10 +132,9 @@ router.get('/unread', async (req: Request, res: Response) => {
  */
 router.get('/conversation', async (req: Request, res: Response) => {
   try {
-    const sessionId = req.query.sessionId as string | undefined;
     const { conversationUrl, profileUrl, forceRefresh } = req.query;
 
-    const authCheck = checkAuth(sessionId);
+    const authCheck = checkAuth();
     if (!authCheck.ok) {
       return res.status(authCheck.error!.status).json({
         success: false,
@@ -180,7 +160,7 @@ router.get('/conversation', async (req: Request, res: Response) => {
 
     const profileUrlStr = profileUrl && typeof profileUrl === 'string' ? profileUrl : undefined;
     const forceRefreshBool = forceRefresh === 'true' || forceRefresh === '1';
-    const result = await LinkedInService.readConversation(sessionId || 'unused', conversationUrl, profileUrlStr, forceRefreshBool);
+    const result = await LinkedInService.readConversation('unused', conversationUrl, profileUrlStr, forceRefreshBool);
 
     res.json(result);
   } catch (error: any) {
@@ -199,9 +179,9 @@ router.get('/conversation', async (req: Request, res: Response) => {
  */
 router.post('/send', async (req: Request, res: Response) => {
   try {
-    const { sessionId, conversationUrl, message, profileUrl } = req.body;
+    const { conversationUrl, message, profileUrl } = req.body;
 
-    const authCheck = checkAuth(sessionId);
+    const authCheck = checkAuth();
     if (!authCheck.ok) {
       return res.status(authCheck.error!.status).json({
         success: false,
@@ -225,7 +205,7 @@ router.post('/send', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.sendMessage(sessionId || 'unused', {
+    const result = await LinkedInService.sendMessage('unused', {
       conversationUrl,
       message,
       profileUrl: profileUrl && typeof profileUrl === 'string' ? profileUrl : undefined,
@@ -254,10 +234,9 @@ router.post('/send', async (req: Request, res: Response) => {
  */
 router.get('/conversation-url', async (req: Request, res: Response) => {
   try {
-    const sessionId = req.query.sessionId as string | undefined;
     const { profileUrl } = req.query;
 
-    const authCheck = checkAuth(sessionId);
+    const authCheck = checkAuth();
     if (!authCheck.ok) {
       return res.status(authCheck.error!.status).json({
         success: false,
@@ -272,7 +251,7 @@ router.get('/conversation-url', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.getConversationUrlFromProfile(sessionId || 'unused', profileUrl);
+    const result = await LinkedInService.getConversationUrlFromProfile('unused', profileUrl);
 
     res.json(result);
   } catch (error: any) {

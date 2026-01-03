@@ -182,7 +182,7 @@ describe('Authentication API', () => {
   });
 
   describe('POST /api/auth/init (legacy endpoint)', () => {
-    it('should initialize a browser session and return a session ID', async () => {
+    it('should initialize a browser session and return singleton sessionId for backward compatibility', async () => {
       // Setup
       const mockBrowser = { close: jest.fn() } as any;
       const mockPage = { goto: jest.fn(), url: jest.fn() } as any;
@@ -192,21 +192,20 @@ describe('Authentication API', () => {
         sessionRestored: false,
         isAuthenticated: false,
       });
-      mockedSessionManager.createSession.mockReturnValue('session123');
 
       // Execution
       const response = await request(app).post('/api/auth/init');
 
-      // Assertion
+      // Assertion - now returns 'singleton' as sessionId for backward compatibility
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({
         success: true,
-        sessionId: 'session123',
+        sessionId: 'singleton',
         sessionRestored: false,
         message: 'Browser initialized',
       });
       expect(mockedLinkedInService.initializeBrowser).toHaveBeenCalledTimes(1);
-      expect(mockedSessionManager.createSession).toHaveBeenCalledWith(mockBrowser, mockPage);
+      // SessionManager is no longer used - singleton browser is the only system
     });
 
     it('should return a 500 error if browser initialization fails', async () => {
@@ -529,9 +528,35 @@ describe('Authentication API', () => {
       });
     });
 
-    it('should return 404 for non-existent legacy session', async () => {
-      // Setup
-      mockedSessionManager.getSession.mockReturnValue(undefined);
+    it('should return singleton session for any sessionId when browser is ready (backward compat)', async () => {
+      // Setup - browser is ready (set in beforeEach)
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.getStatus.mockReturnValue({
+        ready: true,
+        authenticated: true,
+        hasMonitoring: true,
+        userIdentifier: 'test@example.com',
+      });
+
+      // Execution - any sessionId returns singleton status for backward compatibility
+      const response = await request(app).get('/api/auth/session/any-session-id');
+
+      // Assertion - now returns singleton session info for any sessionId when browser is ready
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        session: {
+          id: 'any-session-id',
+          isAuthenticated: true,
+          hasMonitoring: true,
+          userIdentifier: 'test@example.com',
+        },
+      });
+    });
+
+    it('should return 404 when browser is not ready and sessionId is not singleton', async () => {
+      // Setup - browser is not ready
+      mockedLinkedInBrowser.isReady.mockReturnValue(false);
 
       // Execution
       const response = await request(app).get('/api/auth/session/invalid-session');
@@ -540,18 +565,19 @@ describe('Authentication API', () => {
       expect(response.status).toBe(404);
       expect(response.body).toEqual({
         success: false,
-        message: 'Session not found',
+        message: 'Session not found (browser not initialized)',
       });
     });
 
     it('should handle errors when retrieving session details', async () => {
-      // Setup
-      mockedSessionManager.getSession.mockImplementation(() => {
+      // Setup - make getStatus throw an error
+      mockedLinkedInBrowser.isReady.mockReturnValue(true);
+      mockedLinkedInBrowser.getStatus.mockImplementation(() => {
         throw new Error('Internal error');
       });
 
       // Execution
-      const response = await request(app).get('/api/auth/session/session123');
+      const response = await request(app).get('/api/auth/session/any-session');
 
       // Assertion
       expect(response.status).toBe(500);

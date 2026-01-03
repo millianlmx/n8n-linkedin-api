@@ -126,20 +126,20 @@ describe('Messaging API', () => {
   });
 
   describe('GET /api/messages/conversations', () => {
-    it('should list all conversations with sessionId (legacy)', async () => {
+    it('should list all conversations with sessionId (backward compat)', async () => {
       // Setup
       const mockConversations = [{ name: 'Test User', url: 'https://linkedin.com/messaging/thread/123' }];
       mockedLinkedInService.listConversations.mockResolvedValue({ success: true, data: mockConversations } as any);
 
-      // Execution
+      // Execution - sessionId is accepted but ignored (singleton browser)
       const response = await request(app)
         .get('/api/messages/conversations')
         .query({ sessionId: 'session123' });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockConversations });
-      expect(mockedLinkedInService.listConversations).toHaveBeenCalledWith('session123');
+      expect(mockedLinkedInService.listConversations).toHaveBeenCalledWith('unused');
     });
 
     it('should list all conversations without sessionId (new system)', async () => {
@@ -188,21 +188,21 @@ describe('Messaging API', () => {
   });
 
   describe('GET /api/messages/conversation', () => {
-    it('should read messages from a conversation with sessionId (legacy)', async () => {
+    it('should read messages from a conversation with sessionId (backward compat)', async () => {
       // Setup
       const mockMessages = [{ sender: 'Test User', message: 'Hello!', timestamp: '2023-01-01' }];
       const conversationUrl = 'https://linkedin.com/messaging/thread/123';
       mockedLinkedInService.readConversation.mockResolvedValue({ success: true, data: mockMessages } as any);
 
-      // Execution
+      // Execution - sessionId is accepted but ignored (singleton browser)
       const response = await request(app)
         .get('/api/messages/conversation')
         .query({ sessionId: 'session123', conversationUrl });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockMessages });
-      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, undefined, false);
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('unused', conversationUrl, undefined, false);
     });
 
     it('should read messages from a conversation without sessionId (new system)', async () => {
@@ -233,10 +233,10 @@ describe('Messaging API', () => {
         .get('/api/messages/conversation')
         .query({ sessionId: 'session123', conversationUrl, profileUrl });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockMessages, cached: false, cacheUpdated: true });
-      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, profileUrl, false);
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('unused', conversationUrl, profileUrl, false);
     });
 
     it('should return cached conversation when available', async () => {
@@ -251,10 +251,10 @@ describe('Messaging API', () => {
         .get('/api/messages/conversation')
         .query({ sessionId: 'session123', conversationUrl, profileUrl });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockMessages, cached: true, cacheUpdated: false });
-      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, profileUrl, false);
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('unused', conversationUrl, profileUrl, false);
     });
 
     it('should force refresh and bypass cache when forceRefresh is true', async () => {
@@ -269,10 +269,10 @@ describe('Messaging API', () => {
         .get('/api/messages/conversation')
         .query({ sessionId: 'session123', conversationUrl, profileUrl, forceRefresh: 'true' });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockMessages, cached: false, cacheUpdated: true });
-      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, profileUrl, true);
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('unused', conversationUrl, profileUrl, true);
     });
 
     it('should force refresh with forceRefresh=1', async () => {
@@ -287,9 +287,9 @@ describe('Messaging API', () => {
         .get('/api/messages/conversation')
         .query({ sessionId: 'session123', conversationUrl, profileUrl, forceRefresh: '1' });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
-      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('session123', conversationUrl, profileUrl, true);
+      expect(mockedLinkedInService.readConversation).toHaveBeenCalledWith('unused', conversationUrl, profileUrl, true);
     });
 
     it('should return cacheUpdated=false when force refresh finds no changes', async () => {
@@ -370,7 +370,7 @@ describe('Messaging API', () => {
   });
 
   describe('POST /api/messages/send', () => {
-    it('should send a message to a conversation with sessionId (legacy)', async () => {
+    it('should send a message to a conversation with sessionId (backward compat)', async () => {
       // Setup
       const messageData = {
         sessionId: 'session123',
@@ -384,12 +384,13 @@ describe('Messaging API', () => {
         .post('/api/messages/send')
         .send(messageData);
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, message: 'Message sent' });
-      expect(mockedLinkedInService.sendMessage).toHaveBeenCalledWith('session123', {
+      expect(mockedLinkedInService.sendMessage).toHaveBeenCalledWith('unused', {
         conversationUrl: messageData.conversationUrl,
-        message: messageData.message
+        message: messageData.message,
+        profileUrl: undefined
       });
     });
 
@@ -483,20 +484,20 @@ describe('Messaging API', () => {
   });
 
   describe('GET /api/messages/unread', () => {
-    it('should get unread messages with sessionId (legacy)', async () => {
+    it('should get unread messages with sessionId (backward compat)', async () => {
       // Setup
       const mockUnreadMessages = [{ sender: 'User1', message: 'New message' }];
       mockedLinkedInService.getUnreadMessages.mockResolvedValue({ success: true, data: mockUnreadMessages } as any);
 
-      // Execution
+      // Execution - sessionId is accepted but ignored (singleton browser)
       const response = await request(app)
         .get('/api/messages/unread')
         .query({ sessionId: 'session123' });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockUnreadMessages });
-      expect(mockedLinkedInService.getUnreadMessages).toHaveBeenCalledWith('session123');
+      expect(mockedLinkedInService.getUnreadMessages).toHaveBeenCalledWith('unused');
     });
 
     it('should get unread messages without sessionId (new system)', async () => {

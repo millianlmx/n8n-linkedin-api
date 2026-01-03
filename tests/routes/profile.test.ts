@@ -206,8 +206,24 @@ describe('Profile API', () => {
   });
 
   describe('POST /api/profile/visit', () => {
-    // Note: The /visit endpoint still requires sessionId (legacy mode only)
-    it('should visit a profile successfully with sessionId', async () => {
+    // Note: The /visit endpoint now uses singleton browser (sessionId is ignored)
+    it('should visit a profile successfully with sessionId (backward compat)', async () => {
+      // Setup
+      const profileUrl = 'https://www.linkedin.com/in/johndoe';
+      mockedLinkedInService.visitProfile.mockResolvedValue({ success: true, message: 'Profile visited' } as any);
+
+      // Execution - sessionId is accepted but ignored (singleton browser)
+      const response = await request(app)
+        .post('/api/profile/visit')
+        .send({ sessionId: validSessionId, url: profileUrl });
+
+      // Assertion - sessionId is ignored, 'unused' is passed to service
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, message: 'Profile visited' });
+      expect(mockedLinkedInService.visitProfile).toHaveBeenCalledWith('unused', profileUrl);
+    });
+
+    it('should visit a profile without sessionId (new system)', async () => {
       // Setup
       const profileUrl = 'https://www.linkedin.com/in/johndoe';
       mockedLinkedInService.visitProfile.mockResolvedValue({ success: true, message: 'Profile visited' } as any);
@@ -215,26 +231,12 @@ describe('Profile API', () => {
       // Execution
       const response = await request(app)
         .post('/api/profile/visit')
-        .send({ sessionId: validSessionId, url: profileUrl });
+        .send({ url: profileUrl });
 
       // Assertion
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, message: 'Profile visited' });
-      expect(mockedLinkedInService.visitProfile).toHaveBeenCalledWith(validSessionId, profileUrl);
-    });
-
-    it('should return 400 when sessionId is missing (visit requires sessionId)', async () => {
-      // Execution
-      const response = await request(app)
-        .post('/api/profile/visit')
-        .send({ url: 'https://www.linkedin.com/in/johndoe' });
-
-      // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toMatchObject({
-        success: false,
-        message: 'Valid Session ID is required',
-      });
+      expect(mockedLinkedInService.visitProfile).toHaveBeenCalledWith('unused', profileUrl);
     });
 
     it('should return a 400 error when url is missing', async () => {
@@ -267,33 +269,35 @@ describe('Profile API', () => {
   });
 
   describe('GET /api/profile/views', () => {
-    it('should get profile views successfully with sessionId (legacy)', async () => {
+    it('should get profile views successfully with sessionId (backward compat)', async () => {
+      // Setup
+      const mockProfileViews = { profile: { name: 'Test User' } };
+      mockedLinkedInService.getProfileViews.mockResolvedValue({ success: true, data: mockProfileViews } as any);
+
+      // Execution - sessionId is accepted but ignored (singleton browser)
+      const response = await request(app)
+        .get('/api/profile/views')
+        .query({ sessionId: validSessionId });
+
+      // Assertion - sessionId is ignored, 'unused' is passed to service
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, data: mockProfileViews });
+      expect(mockedLinkedInService.getProfileViews).toHaveBeenCalledWith('unused');
+    });
+
+    it('should get profile views without sessionId (new system)', async () => {
       // Setup
       const mockProfileViews = { profile: { name: 'Test User' } };
       mockedLinkedInService.getProfileViews.mockResolvedValue({ success: true, data: mockProfileViews } as any);
 
       // Execution
       const response = await request(app)
-        .get('/api/profile/views')
-        .query({ sessionId: validSessionId });
+        .get('/api/profile/views');
 
       // Assertion
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockProfileViews });
-      expect(mockedLinkedInService.getProfileViews).toHaveBeenCalledWith(validSessionId);
-    });
-
-    it('should return 400 when sessionId is missing (views endpoint requires sessionId)', async () => {
-      // Execution
-      const response = await request(app)
-        .get('/api/profile/views');
-
-      // Assertion
-      expect(response.status).toBe(400);
-      expect(response.body).toMatchObject({
-        success: false,
-        message: 'Session ID is required as query parameter',
-      });
+      expect(mockedLinkedInService.getProfileViews).toHaveBeenCalledWith('unused');
     });
 
     it('should handle errors when getting profile views', async () => {

@@ -1,16 +1,12 @@
 import { Router, Request, Response } from 'express';
 import LinkedInService from '../services/LinkedInService';
 import LinkedInBrowser from '../services/LinkedInBrowser';
-import SessionManager from '../services/SessionManager';
 import BrowserStateService from '../services/BrowserStateService';
 import { LoginRequest } from '../types';
 import { createServiceLogger } from '../utils/logger';
 
 const router = Router();
 const log = createServiceLogger('AuthRoutes');
-
-// Flag to control whether to use new LinkedInBrowser (should match LinkedInService)
-const USE_NEW_BROWSER = true;
 
 /**
  * POST /api/auth/initialize (new endpoint) or /api/auth/init (legacy)
@@ -24,56 +20,26 @@ router.post('/initialize', async (req: Request, res: Response) => {
     
     const result = await LinkedInService.initializeBrowser(email);
     
-    if (USE_NEW_BROWSER) {
-      // New system: no sessionId needed
-      log.info('Browser initialized successfully', {
-        sessionRestored: result.sessionRestored || false,
-        isAuthenticated: result.isAuthenticated || false
-      });
-      
-      // Start message monitoring if already authenticated
-      if (result.isAuthenticated) {
-        try {
-          await LinkedInService.startMessageMonitoring('unused');
-          log.info('Message monitoring started automatically');
-        } catch (monitoringError: any) {
-          log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-        }
-      }
-      
-      return res.json({
-        success: true,
-        sessionRestored: result.sessionRestored || false,
-        isAuthenticated: result.isAuthenticated || false,
-        message: result.sessionRestored ? 'Browser initialized with saved session' : 'Browser initialized',
-      });
-    }
+    log.info('Browser initialized successfully', {
+      sessionRestored: result.sessionRestored || false,
+      isAuthenticated: result.isAuthenticated || false
+    });
     
-    // Legacy mode: create session
-    const { browser, page, sessionRestored } = result;
-    const sessionId = SessionManager.createSession(browser, page);
-
-    // If session was restored, mark as authenticated
-    if (sessionRestored) {
-      SessionManager.updateSession(sessionId, {
-        isAuthenticated: true,
-      });
-      
-      // Start message monitoring automatically
+    // Start message monitoring if already authenticated
+    if (result.isAuthenticated) {
       try {
-        await LinkedInService.startMessageMonitoring(sessionId);
+        await LinkedInService.startMessageMonitoring('unused');
         log.info('Message monitoring started automatically');
       } catch (monitoringError: any) {
         log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
       }
     }
-
-    log.info('Session created', { sessionId });
-    res.json({
+    
+    return res.json({
       success: true,
-      sessionId,
-      sessionRestored: sessionRestored || false,
-      message: sessionRestored ? 'Browser initialized with saved session' : 'Browser initialized',
+      sessionRestored: result.sessionRestored || false,
+      isAuthenticated: result.isAuthenticated || false,
+      message: result.sessionRestored ? 'Browser initialized with saved session' : 'Browser initialized',
     });
   } catch (error: any) {
     log.error('Error initializing browser', error);
@@ -84,39 +50,35 @@ router.post('/initialize', async (req: Request, res: Response) => {
   }
 });
 
-// Legacy alias for /initialize
+// Legacy alias for /initialize (kept for backward compatibility)
 router.post('/init', async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     log.info('Received request to initialize browser (legacy /init)', { email: email || 'not provided' });
     
     const result = await LinkedInService.initializeBrowser(email);
-    const { browser, page, sessionRestored } = result;
     
-    // Always create a session for backward compatibility
-    const sessionId = SessionManager.createSession(browser, page);
-
-    // If session was restored, mark as authenticated
-    if (sessionRestored) {
-      SessionManager.updateSession(sessionId, {
-        isAuthenticated: true,
-      });
-      
-      // Start message monitoring automatically
+    log.info('Browser initialized successfully', {
+      sessionRestored: result.sessionRestored || false,
+      isAuthenticated: result.isAuthenticated || false
+    });
+    
+    // Start message monitoring if already authenticated
+    if (result.sessionRestored && result.isAuthenticated) {
       try {
-        await LinkedInService.startMessageMonitoring(sessionId);
+        await LinkedInService.startMessageMonitoring('unused');
         log.info('Message monitoring started automatically');
       } catch (monitoringError: any) {
         log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
       }
     }
 
-    log.info('Session created', { sessionId });
+    // Return a fake sessionId for backward compatibility with existing clients
     res.json({
       success: true,
-      sessionId,
-      sessionRestored: sessionRestored || false,
-      message: sessionRestored ? 'Browser initialized with saved session' : 'Browser initialized',
+      sessionId: 'singleton',
+      sessionRestored: result.sessionRestored || false,
+      message: result.sessionRestored ? 'Browser initialized with saved session' : 'Browser initialized',
     });
   } catch (error: any) {
     log.error('Error initializing browser', error);
@@ -131,132 +93,54 @@ router.post('/init', async (req: Request, res: Response) => {
  * POST /api/auth/login
  * Login to LinkedIn
  * Body: { sessionId?: string, email?: string, password?: string }
- * sessionId is optional when using new browser system
+ * sessionId is optional (ignored - kept for backward compatibility)
  */
 router.post('/login', async (req: Request, res: Response) => {
   try {
-    const { sessionId, email, password } = req.body;
+    const { email, password } = req.body;
 
-    if (USE_NEW_BROWSER) {
-      // New system: sessionId is optional
-      if (!LinkedInBrowser.isReady()) {
-        return res.status(503).json({
-          success: false,
-          message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
-        });
-      }
-      
-      // If already authenticated, return success
-      if (LinkedInBrowser.isAuthenticated()) {
-        log.info('Already authenticated');
-        return res.json({
-          success: true,
-          sessionRestored: true,
-          message: 'Already logged in',
-        });
-      }
-      
-      const userIdentifier = email || process.env.LINKEDIN_EMAIL;
-      
-      // Try to restore browser state with saved cookies
-      if (userIdentifier) {
-        log.info('Attempting to restore browser state', { userIdentifier });
-        
-        const page = LinkedInBrowser.getOperationPage()!;
-        const hasState = await BrowserStateService.hasBrowserState(userIdentifier);
-        
-        if (hasState) {
-          log.debug('Found saved browser state, restoring cookies...');
-          const restored = await BrowserStateService.restoreBrowserState(userIdentifier, page);
-          
-          if (restored) {
-            log.debug('Cookies restored, verifying session...');
-            const isValid = await BrowserStateService.verifySession(page);
-            
-            if (isValid) {
-              log.info('Session is valid - already logged in via cookies');
-              LinkedInBrowser.setAuthenticated(true);
-              LinkedInBrowser.setUserIdentifier(userIdentifier);
-              
-              // Start message monitoring automatically
-              try {
-                await LinkedInService.startMessageMonitoring('unused');
-                log.info('Message monitoring started automatically');
-              } catch (monitoringError: any) {
-                log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-              }
-              
-              return res.json({
-                success: true,
-                sessionRestored: true,
-                message: 'Login successful (session restored from cookies)',
-              });
-            } else {
-              log.warn('Saved session expired, proceeding with real login...');
-              await BrowserStateService.deleteBrowserState(userIdentifier);
-              await LinkedInBrowser.clearBrowserState();
-            }
-          }
-        }
-      }
-      
-      // Proceed with real login
-      log.info('Initiating real LinkedIn login...');
-      const credentials: LoginRequest = { email, password };
-      await LinkedInService.login('unused', credentials);
-      
+    if (!LinkedInBrowser.isReady()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+      });
+    }
+    
+    // If already authenticated, return success
+    if (LinkedInBrowser.isAuthenticated()) {
+      log.info('Already authenticated');
       return res.json({
         success: true,
-        sessionRestored: false,
-        message: 'Login successful',
+        sessionRestored: true,
+        message: 'Already logged in',
       });
     }
-
-    // Legacy mode: sessionId is required
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Session ID is required',
-      });
-    }
-
-    const session = SessionManager.getSession(sessionId);
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        message: 'Session not found',
-      });
-    }
-
-    const { page } = session;
+    
     const userIdentifier = email || process.env.LINKEDIN_EMAIL;
-
-    // Step 1: Try to restore browser state with saved cookies
+    
+    // Try to restore browser state with saved cookies
     if (userIdentifier) {
       log.info('Attempting to restore browser state', { userIdentifier });
       
+      const page = LinkedInBrowser.getOperationPage()!;
       const hasState = await BrowserStateService.hasBrowserState(userIdentifier);
+      
       if (hasState) {
         log.debug('Found saved browser state, restoring cookies...');
         const restored = await BrowserStateService.restoreBrowserState(userIdentifier, page);
         
         if (restored) {
           log.debug('Cookies restored, verifying session...');
-          
-          // Step 2: Check if we're logged in by navigating to feed and checking URL
           const isValid = await BrowserStateService.verifySession(page);
           
           if (isValid) {
-            // Step 3: Already logged in - skip real login
             log.info('Session is valid - already logged in via cookies');
-            
-            SessionManager.updateSession(sessionId, {
-              isAuthenticated: true,
-            });
+            LinkedInBrowser.setAuthenticated(true);
+            LinkedInBrowser.setUserIdentifier(userIdentifier);
             
             // Start message monitoring automatically
             try {
-              await LinkedInService.startMessageMonitoring(sessionId);
+              await LinkedInService.startMessageMonitoring('unused');
               log.info('Message monitoring started automatically');
             } catch (monitoringError: any) {
               log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
@@ -264,46 +148,25 @@ router.post('/login', async (req: Request, res: Response) => {
             
             return res.json({
               success: true,
-              sessionId,
               sessionRestored: true,
               message: 'Login successful (session restored from cookies)',
             });
           } else {
             log.warn('Saved session expired, proceeding with real login...');
-            // Delete expired state
             await BrowserStateService.deleteBrowserState(userIdentifier);
-            
-            // Clear all cookies and storage to ensure a clean state
-            const browser = page.browser();
-            if (browser) {
-              const client = await page.target().createCDPSession();
-              await client.send('Network.clearBrowserCookies');
-              await client.send('Network.clearBrowserCache');
-            }
-            
-            // Clear localStorage and sessionStorage
-            await page.evaluate(() => {
-              localStorage.clear();
-              sessionStorage.clear();
-            });
-            
-            // Navigate to blank page to reset state
-            await page.goto('about:blank', { waitUntil: 'domcontentloaded' });
+            await LinkedInBrowser.clearBrowserState();
           }
         }
-      } else {
-        log.debug('No saved browser state found, proceeding with real login...');
       }
     }
-
-    // Step 4: Proceed with real login flow
+    
+    // Proceed with real login
     log.info('Initiating real LinkedIn login...');
     const credentials: LoginRequest = { email, password };
-    await LinkedInService.login(sessionId, credentials);
-
-    res.json({
+    await LinkedInService.login('unused', credentials);
+    
+    return res.json({
       success: true,
-      sessionId,
       sessionRestored: false,
       message: 'Login successful',
     });
@@ -317,28 +180,14 @@ router.post('/login', async (req: Request, res: Response) => {
 
 /**
  * GET /api/auth/status
- * Get current authentication status (new endpoint for new browser system)
+ * Get current authentication status
  */
-router.get('/status', (req: Request, res: Response) => {
+router.get('/status', (_req: Request, res: Response) => {
   try {
-    if (USE_NEW_BROWSER) {
-      const status = LinkedInBrowser.getStatus();
-      return res.json({
-        success: true,
-        ...status,
-      });
-    }
-    
-    // Legacy mode: check all sessions
-    const sessions = SessionManager.getAllSessions();
-    const authenticatedSessions = sessions.filter(s => s.isAuthenticated);
-    
-    res.json({
+    const status = LinkedInBrowser.getStatus();
+    return res.json({
       success: true,
-      ready: sessions.length > 0,
-      authenticated: authenticatedSessions.length > 0,
-      sessionCount: sessions.length,
-      authenticatedCount: authenticatedSessions.length,
+      ...status,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -351,33 +200,13 @@ router.get('/status', (req: Request, res: Response) => {
 /**
  * DELETE /api/auth/logout
  * Logout and close browser session
- * Body: { sessionId?: string } - sessionId is optional when using new browser system
+ * Body: { sessionId?: string } - sessionId is optional (ignored - kept for backward compatibility)
  */
-router.delete('/logout', async (req: Request, res: Response) => {
+router.delete('/logout', async (_req: Request, res: Response) => {
   try {
-    const { sessionId } = req.body;
-
-    if (USE_NEW_BROWSER) {
-      // Close the singleton browser
-      await LinkedInBrowser.close();
-      log.info('Browser closed');
-      return res.json({
-        success: true,
-        message: 'Logged out successfully',
-      });
-    }
-
-    // Legacy mode
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Session ID is required',
-      });
-    }
-
-    await SessionManager.deleteSession(sessionId);
-
-    res.json({
+    await LinkedInBrowser.close();
+    log.info('Browser closed');
+    return res.json({
       success: true,
       message: 'Logged out successfully',
     });
@@ -391,31 +220,21 @@ router.delete('/logout', async (req: Request, res: Response) => {
 
 /**
  * GET /api/auth/sessions
- * Get all active sessions (legacy endpoint - kept for backward compatibility)
+ * Get all active sessions (kept for backward compatibility)
+ * Returns status as a single "session" since we use singleton browser
  */
-router.get('/sessions', (req: Request, res: Response) => {
+router.get('/sessions', (_req: Request, res: Response) => {
   try {
-    if (USE_NEW_BROWSER) {
-      // Return status as a single "session"
-      const status = LinkedInBrowser.getStatus();
-      return res.json({
-        success: true,
-        sessions: status.ready ? [{
-          id: 'singleton',
-          isAuthenticated: status.authenticated,
-          hasMonitoring: status.hasMonitoring,
-          userIdentifier: status.userIdentifier,
-        }] : [],
-        count: status.ready ? 1 : 0,
-      });
-    }
-    
-    const sessions = SessionManager.getAllSessions();
-    
-    res.json({
+    const status = LinkedInBrowser.getStatus();
+    return res.json({
       success: true,
-      sessions: sessions,
-      count: sessions.length,
+      sessions: status.ready ? [{
+        id: 'singleton',
+        isAuthenticated: status.authenticated,
+        hasMonitoring: status.hasMonitoring,
+        userIdentifier: status.userIdentifier,
+      }] : [],
+      count: status.ready ? 1 : 0,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -427,18 +246,19 @@ router.get('/sessions', (req: Request, res: Response) => {
 
 /**
  * GET /api/auth/session/:sessionId
- * Get session details including authentication status (legacy endpoint)
+ * Get session details including authentication status (kept for backward compatibility)
  */
 router.get('/session/:sessionId', (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
     
-    if (USE_NEW_BROWSER && sessionId === 'singleton') {
+    // Accept 'singleton' or any sessionId (for backward compatibility)
+    if (sessionId === 'singleton' || LinkedInBrowser.isReady()) {
       const status = LinkedInBrowser.getStatus();
       return res.json({
         success: true,
         session: {
-          id: 'singleton',
+          id: sessionId,
           isAuthenticated: status.authenticated,
           hasMonitoring: status.hasMonitoring,
           userIdentifier: status.userIdentifier,
@@ -446,24 +266,9 @@ router.get('/session/:sessionId', (req: Request, res: Response) => {
       });
     }
     
-    const session = SessionManager.getSession(sessionId);
-    
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        message: 'Session not found',
-      });
-    }
-    
-    res.json({
-      success: true,
-      session: {
-        id: session.id,
-        isAuthenticated: session.isAuthenticated,
-        createdAt: session.createdAt,
-        lastUsed: session.lastUsed,
-        currentUrl: session.page.url(),
-      },
+    return res.status(404).json({
+      success: false,
+      message: 'Session not found (browser not initialized)',
     });
   } catch (error: any) {
     res.status(500).json({
@@ -476,69 +281,19 @@ router.get('/session/:sessionId', (req: Request, res: Response) => {
 /**
  * POST /api/auth/force-authenticate
  * Force mark session as authenticated (workaround for timeout issues)
- * Body: { sessionId?: string } - sessionId is optional when using new browser system
+ * Body: { sessionId?: string } - sessionId is optional (ignored - kept for backward compatibility)
  */
-router.post('/force-authenticate', async (req: Request, res: Response) => {
+router.post('/force-authenticate', async (_req: Request, res: Response) => {
   try {
-    const { sessionId } = req.body;
-    
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady()) {
-        return res.status(503).json({
-          success: false,
-          message: 'Browser not initialized',
-        });
-      }
-      
-      const page = LinkedInBrowser.getOperationPage();
-      const currentUrl = page?.url() || '';
-      
-      // Only allow if already on a LinkedIn page (not login page)
-      if (currentUrl.includes('/login')) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot force authenticate - still on login page',
-          currentUrl,
-        });
-      }
-      
-      // Force authenticate
-      LinkedInBrowser.setAuthenticated(true);
-      
-      // Start message monitoring
-      log.info('Starting automatic message monitoring...');
-      try {
-        await LinkedInService.startMessageMonitoring('unused');
-        log.info('Message monitoring started automatically');
-      } catch (monitoringError: any) {
-        log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-      }
-      
-      return res.json({
-        success: true,
-        message: 'Session marked as authenticated',
-        currentUrl,
-      });
-    }
-    
-    // Legacy mode
-    if (!sessionId) {
-      return res.status(400).json({
+    if (!LinkedInBrowser.isReady()) {
+      return res.status(503).json({
         success: false,
-        message: 'Session ID is required',
+        message: 'Browser not initialized',
       });
     }
     
-    const session = SessionManager.getSession(sessionId);
-    
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        message: 'Session not found',
-      });
-    }
-    
-    const currentUrl = session.page.url();
+    const page = LinkedInBrowser.getOperationPage();
+    const currentUrl = page?.url() || '';
     
     // Only allow if already on a LinkedIn page (not login page)
     if (currentUrl.includes('/login')) {
@@ -550,27 +305,21 @@ router.post('/force-authenticate', async (req: Request, res: Response) => {
     }
     
     // Force authenticate
-    SessionManager.updateSession(sessionId, {
-      isAuthenticated: true,
-    });
+    LinkedInBrowser.setAuthenticated(true);
     
-    // Automatically start message monitoring in a separate tab
+    // Start message monitoring
     log.info('Starting automatic message monitoring...');
     try {
-      await LinkedInService.startMessageMonitoring(sessionId);
+      await LinkedInService.startMessageMonitoring('unused');
       log.info('Message monitoring started automatically');
     } catch (monitoringError: any) {
       log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
     }
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Session marked as authenticated',
-      session: {
-        id: session.id,
-        isAuthenticated: true,
-        currentUrl,
-      },
+      currentUrl,
     });
   } catch (error: any) {
     res.status(500).json({

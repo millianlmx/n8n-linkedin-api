@@ -119,22 +119,22 @@ describe('Search API', () => {
   });
 
   describe('POST /api/search/people', () => {
-    it('should search for people by keywords with sessionId (legacy)', async () => {
+    it('should search for people by keywords with sessionId (backward compat)', async () => {
       // Setup
       const mockSearchResults = [{ name: 'John Doe', url: 'https://linkedin.com/in/johndoe' }];
       const keywords = 'Software Engineer';
       const limit = 10;
       mockedLinkedInService.searchPeople.mockResolvedValue({ success: true, data: mockSearchResults } as any);
 
-      // Execution
+      // Execution - sessionId is accepted but ignored (singleton browser)
       const response = await request(app)
         .post('/api/search/people')
         .send({ sessionId: 'session123', keywords, limit });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockSearchResults });
-      expect(mockedLinkedInService.searchPeople).toHaveBeenCalledWith('session123', keywords, limit);
+      expect(mockedLinkedInService.searchPeople).toHaveBeenCalledWith('unused', keywords, limit);
     });
 
     it('should search for people by keywords without sessionId (new system)', async () => {
@@ -166,10 +166,10 @@ describe('Search API', () => {
         .post('/api/search/people')
         .send({ sessionId: 'session123', keywords, limit });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body.data.length).toBe(2);
-      expect(mockedLinkedInService.searchPeople).toHaveBeenCalledWith('session123', keywords, limit);
+      expect(mockedLinkedInService.searchPeople).toHaveBeenCalledWith('unused', keywords, limit);
     });
 
     it('should use default limit of 50 when not provided', async () => {
@@ -183,10 +183,10 @@ describe('Search API', () => {
         .post('/api/search/people')
         .send({ sessionId: 'session123', keywords });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, data: mockSearchResults });
-      expect(mockedLinkedInService.searchPeople).toHaveBeenCalledWith('session123', keywords, 50);
+      expect(mockedLinkedInService.searchPeople).toHaveBeenCalledWith('unused', keywords, 50);
     });
 
     it('should return 503 when browser not ready and no sessionId (new system)', async () => {

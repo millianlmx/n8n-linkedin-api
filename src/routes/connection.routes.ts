@@ -6,41 +6,28 @@ import { createServiceLogger } from '../utils/logger';
 const router = Router();
 const log = createServiceLogger('ConnectionRoutes');
 
-// Flag to control whether to use new LinkedInBrowser (should match LinkedInService)
-const USE_NEW_BROWSER = true;
-
 /**
  * POST /api/connection/send-request
  * Send a connection request to a LinkedIn profile
- * Body: { sessionId?: string, profileUrl: string, message?: string }
- * sessionId is optional when using new browser system
+ * Body: { profileUrl: string, message?: string, sessionId?: string }
+ * sessionId is optional (ignored - kept for backward compatibility)
  */
 router.post('/send-request', async (req: Request, res: Response) => {
   try {
-    const { sessionId, profileUrl, message } = req.body;
+    const { profileUrl, message } = req.body;
 
     // Check authentication
-    if (USE_NEW_BROWSER) {
-      if (!LinkedInBrowser.isReady()) {
-        return res.status(503).json({
-          success: false,
-          message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
-        });
-      }
-      if (!LinkedInBrowser.isAuthenticated()) {
-        return res.status(401).json({
-          success: false,
-          message: 'Not authenticated. Please call POST /api/auth/login first.',
-        });
-      }
-    } else {
-      // Legacy mode
-      if (!sessionId) {
-        return res.status(400).json({
-          success: false,
-          message: 'Session ID is required',
-        });
-      }
+    if (!LinkedInBrowser.isReady()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Browser not initialized. Please call POST /api/auth/initialize first.',
+      });
+    }
+    if (!LinkedInBrowser.isAuthenticated()) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authenticated. Please call POST /api/auth/login first.',
+      });
     }
 
     if (!profileUrl) {
@@ -50,7 +37,7 @@ router.post('/send-request', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await LinkedInService.sendConnectionRequest(sessionId || 'unused', profileUrl, message);
+    const result = await LinkedInService.sendConnectionRequest('unused', profileUrl, message);
 
     res.json(result);
   } catch (error: any) {

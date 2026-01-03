@@ -127,20 +127,20 @@ describe('Connection API', () => {
   });
 
   describe('POST /api/connection/send-request', () => {
-    it('should send a connection request successfully with sessionId (legacy)', async () => {
+    it('should send a connection request successfully with sessionId (backward compat)', async () => {
       // Setup
       mockedLinkedInService.sendConnectionRequest.mockResolvedValue({ success: true, message: 'Connection request sent' } as any);
 
-      // Execution
+      // Execution - sessionId is accepted but ignored (singleton browser)
       const response = await request(app)
         .post('/api/connection/send-request')
         .send({ sessionId: 'session123', profileUrl: 'https://www.linkedin.com/in/test-profile' });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, message: 'Connection request sent' });
       expect(mockedLinkedInService.sendConnectionRequest).toHaveBeenCalledWith(
-        'session123',
+        'unused',
         'https://www.linkedin.com/in/test-profile',
         undefined
       );
@@ -170,11 +170,11 @@ describe('Connection API', () => {
         .post('/api/connection/send-request')
         .send({ sessionId: 'session123', profileUrl: 'https://www.linkedin.com/in/test-profile', message });
 
-      // Assertion
+      // Assertion - sessionId is ignored, 'unused' is passed to service
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ success: true, message: 'Connection request sent' });
       expect(mockedLinkedInService.sendConnectionRequest).toHaveBeenCalledWith(
-        'session123',
+        'unused',
         'https://www.linkedin.com/in/test-profile',
         message
       );
