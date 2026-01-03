@@ -1,6 +1,4 @@
-FROM n8nio/n8n:next AS builder
-
-USER root
+FROM node:20-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache python3 make g++
