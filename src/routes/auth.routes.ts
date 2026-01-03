@@ -27,12 +27,9 @@ router.post('/initialize', async (req: Request, res: Response) => {
     
     // Start message monitoring if already authenticated
     if (result.isAuthenticated) {
-      try {
-        await LinkedInService.startMessageMonitoring('unused');
-        log.info('Message monitoring started automatically');
-      } catch (monitoringError: any) {
-        log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-      }
+      // NOTE: Automatic monitoring disabled to prevent cookie/session issues
+      // Monitoring can be started manually via POST /api/messages/monitoring/start
+      log.debug('Skipping automatic monitoring (disabled to preserve session cookies)');
     }
     
     return res.json({
@@ -65,12 +62,9 @@ router.post('/init', async (req: Request, res: Response) => {
     
     // Start message monitoring if already authenticated
     if (result.sessionRestored && result.isAuthenticated) {
-      try {
-        await LinkedInService.startMessageMonitoring('unused');
-        log.info('Message monitoring started automatically');
-      } catch (monitoringError: any) {
-        log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-      }
+      // NOTE: Automatic monitoring disabled to prevent cookie/session issues
+      // Monitoring can be started manually via POST /api/messages/monitoring/start
+      log.debug('Skipping automatic monitoring (disabled to preserve session cookies)');
     }
 
     // Return a fake sessionId for backward compatibility with existing clients
@@ -138,13 +132,9 @@ router.post('/login', async (req: Request, res: Response) => {
             LinkedInBrowser.setAuthenticated(true);
             LinkedInBrowser.setUserIdentifier(userIdentifier);
             
-            // Start message monitoring automatically
-            try {
-              await LinkedInService.startMessageMonitoring('unused');
-              log.info('Message monitoring started automatically');
-            } catch (monitoringError: any) {
-              log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-            }
+            // NOTE: Automatic monitoring disabled to prevent cookie/session issues
+            // Monitoring can be started manually via POST /api/messages/monitoring/start
+            log.debug('Skipping automatic monitoring (disabled to preserve session cookies)');
             
             return res.json({
               success: true,
@@ -307,14 +297,9 @@ router.post('/force-authenticate', async (_req: Request, res: Response) => {
     // Force authenticate
     LinkedInBrowser.setAuthenticated(true);
     
-    // Start message monitoring
-    log.info('Starting automatic message monitoring...');
-    try {
-      await LinkedInService.startMessageMonitoring('unused');
-      log.info('Message monitoring started automatically');
-    } catch (monitoringError: any) {
-      log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-    }
+    // NOTE: Automatic monitoring disabled to prevent cookie/session issues
+    // Monitoring can be started manually via POST /api/messages/monitoring/start
+    log.debug('Skipping automatic monitoring (disabled to preserve session cookies)');
     
     return res.json({
       success: true,

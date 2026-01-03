@@ -141,6 +141,58 @@ class LinkedInService {
   }
 
   /**
+   * Attempt to restore cookies from database if they're missing
+   * @returns true if cookies were restored, false otherwise
+   * @private
+   */
+  private async attemptCookieRestoration(): Promise<boolean> {
+    try {
+      const userIdentifier = LinkedInBrowser.getUserIdentifier();
+      if (!userIdentifier) {
+        log.warn('Cannot restore cookies - no user identifier');
+        return false;
+      }
+
+      const page = LinkedInBrowser.getOperationPage();
+      if (!page) {
+        log.warn('Cannot restore cookies - no operation page');
+        return false;
+      }
+
+      log.info('Attempting to restore cookies from database', { userIdentifier });
+      
+      // Import BrowserStateService dynamically to avoid circular dependency
+      const BrowserStateService = (await import('./BrowserStateService')).default;
+      
+      const hasState = await BrowserStateService.hasBrowserState(userIdentifier);
+      if (!hasState) {
+        log.warn('No saved state found for user', { userIdentifier });
+        return false;
+      }
+
+      const restored = await BrowserStateService.restoreBrowserState(userIdentifier, page);
+      if (restored) {
+        // Verify the restored session
+        const cookieStatus = await LinkedInBrowser.getLinkedInCookies();
+        if (cookieStatus.hasLiAt) {
+          log.info('Cookies restored successfully from database', {
+            cookieCount: cookieStatus.cookieCount
+          });
+          return true;
+        } else {
+          log.warn('Cookie restoration completed but li_at still missing');
+          return false;
+        }
+      }
+
+      return false;
+    } catch (error: any) {
+      log.error('Failed to restore cookies', error);
+      return false;
+    }
+  }
+
+  /**
    * Ensure cookies are maintained across navigation (DEPRECATED - use verifyCookiesPresent instead)
    * Re-applying cookies can cause LinkedIn to invalidate the session
    * @param sessionId - Session identifier
@@ -355,16 +407,10 @@ class LinkedInService {
           log.warn('Failed to save browser state', saveError);
         }
 
-        // Automatically start message monitoring in a separate tab
-        log.debug('Starting automatic message monitoring');
-        try {
-          // Wait a moment for cookies to fully propagate before opening new tab
-          await this.wait(1000);
-          await this.startMessageMonitoring(sessionId);
-          log.info('Message monitoring started');
-        } catch (monitoringError: any) {
-          log.warn('Failed to start automatic monitoring', { error: monitoringError.message });
-        }
+        // NOTE: Automatic message monitoring has been disabled to prevent cookie/session issues.
+        // Creating a second tab for monitoring was causing LinkedIn to invalidate the li_at cookie.
+        // Monitoring can still be started manually via POST /api/messages/monitoring/start if needed.
+        log.debug('Skipping automatic message monitoring (disabled to preserve session cookies)');
 
         return {
           success: true,
@@ -393,12 +439,16 @@ class LinkedInService {
 
   /**
    * Start message monitoring in a dedicated browser tab
+   * WARNING: This creates a second browser tab which may cause LinkedIn to invalidate cookies.
+   * Only use if message monitoring is essential and you're prepared to re-login if needed.
    * Refreshes every 15 minutes to check for new messages
    */
   async startMessageMonitoring(_sessionId: string) {
     if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
       throw new Error('Not authenticated');
     }
+    
+    log.warn('Starting message monitoring - this may affect session cookies');
     
     // Get or create monitoring page from LinkedInBrowser
     const monitoringPage = await LinkedInBrowser.getOrCreateMonitoringPage();
@@ -1042,13 +1092,31 @@ class LinkedInService {
 
       // Step 5: Verify cookies
       log.debug('[Step 5/8] Verifying cookies', { scrapeId });
-      const cookieStatus = await this.verifyCookiesPresent(sessionId);
+      let cookieStatus = await this.verifyCookiesPresent(sessionId);
       log.debug('[Step 5/8] Cookie verification result', { scrapeId, ...cookieStatus });
       
       if (!cookieStatus.valid) {
-        log.error('[Step 5/8] Essential cookies missing - session likely expired', { scrapeId, ...cookieStatus });
-        this.setAuth(sessionId, false);
-        throw new Error('Session expired (cookies missing). Please login again.');
+        log.warn('[Step 5/8] Essential cookies missing - attempting restoration', { scrapeId, ...cookieStatus });
+        
+        // Attempt to restore cookies from database
+        const restored = await this.attemptCookieRestoration();
+        
+        if (restored) {
+          // Re-verify cookies after restoration
+          cookieStatus = await this.verifyCookiesPresent(sessionId);
+          log.info('[Step 5/8] Cookie restoration result', { scrapeId, ...cookieStatus, restored: true });
+          
+          if (cookieStatus.valid) {
+            // Re-authenticate the session
+            this.setAuth(sessionId, true);
+          }
+        }
+        
+        if (!cookieStatus.valid) {
+          log.error('[Step 5/8] Cookie restoration failed - session expired', { scrapeId, ...cookieStatus });
+          this.setAuth(sessionId, false);
+          throw new Error('Session expired (cookies missing). Please login again.');
+        }
       }
 
       // Step 6: Navigate to profile

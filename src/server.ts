@@ -166,14 +166,11 @@ async function autoInitialize() {
     if (result.isAuthenticated) {
       log.info('✅ Using restored session - skipping login');
 
-      // Start message monitoring automatically
-      try {
-        await LinkedInService.startMessageMonitoring('unused');
-        log.info('✅ Message monitoring started automatically');
-        log.info('\n🎉 System ready! All features active.\n');
-      } catch (monitorError: any) {
-        log.warn('⚠️  Could not start message monitoring:', monitorError.message);
-      }
+      // NOTE: Automatic monitoring disabled to prevent cookie/session issues
+      // Monitoring can be started manually via POST /api/messages/monitoring/start
+      log.info('ℹ️  Message monitoring disabled by default (preserves session cookies)');
+      log.info('   Start manually via POST /api/messages/monitoring/start if needed');
+      log.info('\n🎉 System ready!\n');
       return;
     }
 

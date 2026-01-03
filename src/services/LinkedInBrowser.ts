@@ -284,6 +284,7 @@ class LinkedInBrowser {
 
   /**
    * Create or get the monitoring page
+   * Ensures cookies are properly shared with the new page
    */
   async getOrCreateMonitoringPage(): Promise<Page> {
     if (!this.state) {
@@ -294,6 +295,17 @@ class LinkedInBrowser {
       return this.state.monitoringPage;
     }
 
+    // Get current cookies BEFORE creating new page
+    const browserContext = this.state.browser.defaultBrowserContext();
+    const cookiesBeforeNewPage = await browserContext.cookies();
+    const linkedInCookiesBefore = cookiesBeforeNewPage.filter(c => c.domain.includes('linkedin.com'));
+    
+    log.debug('Cookies before creating monitoring page', {
+      total: cookiesBeforeNewPage.length,
+      linkedIn: linkedInCookiesBefore.length,
+      hasLiAt: linkedInCookiesBefore.some(c => c.name === 'li_at')
+    });
+
     // Create new monitoring page
     const monitoringPage = await this.state.browser.newPage();
     
@@ -303,6 +315,29 @@ class LinkedInBrowser {
         log.debug('[Monitoring] ' + msg.text());
       }
     });
+
+    // Verify cookies still exist after newPage()
+    const cookiesAfterNewPage = await browserContext.cookies();
+    const linkedInCookiesAfter = cookiesAfterNewPage.filter(c => c.domain.includes('linkedin.com'));
+    
+    log.debug('Cookies after creating monitoring page', {
+      total: cookiesAfterNewPage.length,
+      linkedIn: linkedInCookiesAfter.length,
+      hasLiAt: linkedInCookiesAfter.some(c => c.name === 'li_at'),
+      cookieDiff: linkedInCookiesBefore.length - linkedInCookiesAfter.length
+    });
+
+    // If cookies were lost, try to restore them from the saved state
+    if (linkedInCookiesBefore.some(c => c.name === 'li_at') && 
+        !linkedInCookiesAfter.some(c => c.name === 'li_at')) {
+      log.warn('Cookies lost after newPage() - attempting to restore');
+      
+      // Re-set the cookies that were lost
+      if (linkedInCookiesBefore.length > 0) {
+        await browserContext.setCookie(...linkedInCookiesBefore);
+        log.info('Cookies restored after newPage()');
+      }
+    }
 
     this.state.monitoringPage = monitoringPage;
     log.debug('Monitoring page created');
