@@ -1,8 +1,5 @@
 FROM node:20-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache python3 make g++
-
 # Copy n8n custom nodes source
 WORKDIR /tmp/n8n_custom_nodes
 COPY n8n_custom_nodes/package*.json ./
@@ -12,6 +9,11 @@ COPY n8n_custom_nodes/credentials ./credentials/
 
 # Install dependencies and build
 RUN npm install && npm run build
+
+# Verify build output
+RUN ls -la /tmp/n8n_custom_nodes/ && \
+    ls -la /tmp/n8n_custom_nodes/dist/ && \
+    ls -la /tmp/n8n_custom_nodes/dist/nodes/
 
 # Final stage
 FROM n8nio/n8n:next
@@ -31,6 +33,10 @@ RUN mkdir -p /home/node/.n8n/custom && \
 # Copy built custom nodes from builder stage
 COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/dist /home/node/.n8n/custom/dist
 COPY --from=builder --chown=node:node /tmp/n8n_custom_nodes/package.json /home/node/.n8n/custom/
+
+# Verify copy
+RUN ls -la /home/node/.n8n/custom/ && \
+    ls -la /home/node/.n8n/custom/dist/ || echo "dist folder missing"
 
 USER node
 
