@@ -147,11 +147,26 @@ describe('LinkedInService', () => {
       }),
     };
 
+    // Create mock browser context for cookie operations
+    const mockBrowserContext = {
+      cookies: jest.fn().mockResolvedValue([
+        { name: 'li_at', value: 'test', domain: '.linkedin.com' },
+        { name: 'JSESSIONID', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie1', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie2', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie3', value: 'test', domain: '.linkedin.com' },
+        { name: 'cookie4', value: 'test', domain: '.linkedin.com' },
+      ]),
+      setCookie: jest.fn().mockResolvedValue(undefined),
+      clearCookies: jest.fn().mockResolvedValue(undefined),
+    };
+
     // Create mock browser
     mockBrowser = {
       newPage: jest.fn().mockResolvedValue(mockPage),
       close: jest.fn().mockResolvedValue(undefined),
       pages: jest.fn().mockResolvedValue([mockPage]),
+      defaultBrowserContext: jest.fn().mockReturnValue(mockBrowserContext),
     };
 
     // Create mock session (for legacy fallback tests)
