@@ -108,7 +108,7 @@ export class Connection implements INodeType {
 
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
-						url: `${baseUrl}/api/connection/request`,
+						url: `${baseUrl}/api/connection/send-request`,
 						headers: {
 							'Content-Type': 'application/json',
 						},
