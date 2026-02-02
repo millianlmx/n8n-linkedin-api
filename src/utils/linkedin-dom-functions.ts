@@ -461,27 +461,56 @@ export function checkConnectionDegree() {
 }
 
 export function clickConnectButton() {
-  const buttons = Array.from(document.querySelectorAll('button'));
+  // Try multiple stable selectors for the connect button
+  // Priority 1: aria-label containing "Invitez" (Invite) - most stable
+  const inviteButton = document.querySelector('button[aria-label*="Invitez"]') as HTMLButtonElement;
+  if (inviteButton) {
+    inviteButton.click();
+    return true;
+  }
+
+  // Priority 2: Primary button with "Se connecter" text
+  const buttons = Array.from(document.querySelectorAll('button.artdeco-button--primary')) as HTMLButtonElement[];
   for (const button of buttons) {
-    const ariaLabel = button.getAttribute('aria-label');
     const text = button.textContent?.trim();
-    if (ariaLabel?.includes('Connect') || ariaLabel?.includes('Inviter') ||
-      text?.includes('Connect') || text?.includes('Se connecter')) {
+    const ariaLabel = button.getAttribute('aria-label');
+    if (text === 'Se connecter' || text === 'Connect' ||
+        ariaLabel?.includes('rejoindre votre réseau')) {
       button.click();
       return true;
     }
   }
+
+  // Priority 3: Any button with connect text (fallback)
+  const allButtons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+  for (const button of allButtons) {
+    const text = button.textContent?.trim();
+    const ariaLabel = button.getAttribute('aria-label');
+    if (ariaLabel?.includes('Connect') || ariaLabel?.includes('Inviter') ||
+      text?.includes('Se connecter')) {
+      button.click();
+      return true;
+    }
+  }
+
   return false;
 }
 
 export function checkAddNoteButton() {
-  const modal = document.querySelector('#artdeco-modal-outlet');
-  if (!modal) return false;
+  // Use stable selector: dialog role instead of #artdeco-modal-outlet
+  const dialog = document.querySelector('[role="dialog"]');
+  if (!dialog) return false;
 
-  const buttons = Array.from(modal.querySelectorAll('button'));
+  // Look for "Add a note" button using aria-label (most stable)
+  const addButton = dialog.querySelector('button[aria-label="Ajouter une note"]') ||
+                      dialog.querySelector('button[aria-label="Add a note"]');
+  if (addButton) return true;
+
+  // Fallback: text content matching
+  const buttons = Array.from(dialog.querySelectorAll('button'));
   for (const button of buttons) {
     const text = button.textContent?.trim();
-    if (text?.includes('Add a note') || text?.includes('Ajouter une note')) {
+    if (text === 'Ajouter une note' || text === 'Add a note') {
       return true;
     }
   }
@@ -489,13 +518,33 @@ export function checkAddNoteButton() {
 }
 
 export function clickAddNoteButton() {
-  const modal = document.querySelector('#artdeco-modal-outlet');
-  if (!modal) return false;
+  // Use stable selector: dialog role
+  const dialog = document.querySelector('[role="dialog"]');
+  if (!dialog) return false;
 
-  const buttons = Array.from(modal.querySelectorAll('button'));
+  // Use aria-label selector (most stable)
+  const addButton = dialog.querySelector('button[aria-label="Ajouter une note"]') as HTMLButtonElement ||
+                      dialog.querySelector('button[aria-label="Add a note"]') as HTMLButtonElement;
+  if (addButton) {
+    addButton.click();
+    return true;
+  }
+
+  // Fallback: secondary button with matching text
+  const buttons = Array.from(dialog.querySelectorAll('button.artdeco-button--secondary')) as HTMLButtonElement[];
   for (const button of buttons) {
     const text = button.textContent?.trim();
-    if (text?.includes('Add a note') || text?.includes('Ajouter une note')) {
+    if (text === 'Ajouter une note' || text === 'Add a note') {
+      button.click();
+      return true;
+    }
+  }
+
+  // Last resort: any button with matching text
+  const allButtons = Array.from(dialog.querySelectorAll('button')) as HTMLButtonElement[];
+  for (const button of allButtons) {
+    const text = button.textContent?.trim();
+    if (text?.includes('Ajouter une note') || text?.includes('Add a note')) {
       button.click();
       return true;
     }
@@ -504,29 +553,57 @@ export function clickAddNoteButton() {
 }
 
 export function typeNoteMessage(message: string) {
-  const textarea = document.querySelector('#custom-message') as HTMLTextAreaElement;
+  // Try multiple selectors for the message textarea
+  // Priority 1: ID selector (if still present)
+  let textarea = document.querySelector('#custom-message') as HTMLTextAreaElement;
+
+  // Priority 2: Look for textarea in the dialog
+  if (!textarea) {
+    const dialog = document.querySelector('[role="dialog"]');
+    if (dialog) {
+      textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
+    }
+  }
+
+  // Priority 3: Any textarea in the document
+  if (!textarea) {
+    textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+  }
+
   if (textarea) {
     textarea.value = message;
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   }
   return false;
 }
 
 export function clickSendInvitation() {
-  const modal = document.querySelector('#artdeco-modal-outlet');
-  if (!modal) return false;
+  // Use stable selector: dialog role
+  const dialog = document.querySelector('[role="dialog"]');
+  if (!dialog) return false;
 
-  const buttons = Array.from(modal.querySelectorAll('button'));
+  // Use aria-label selector (most stable) - look for send button
+  const sendButton = dialog.querySelector('button[aria-label*="Envoyer"]') as HTMLButtonElement ||
+                      dialog.querySelector('button[aria-label*="Send"]') as HTMLButtonElement;
+  if (sendButton) {
+    sendButton.click();
+    return true;
+  }
+
+  // Fallback: primary button with "Envoyer" or "Send" text
+  const buttons = Array.from(dialog.querySelectorAll('button.artdeco-button--primary')) as HTMLButtonElement[];
   for (const button of buttons) {
-    const ariaLabel = button.getAttribute('aria-label');
     const text = button.textContent?.trim();
-    if (ariaLabel?.includes('Send') || ariaLabel?.includes('Envoyer') ||
-      text?.includes('Send') || text?.includes('Envoyer')) {
+    const ariaLabel = button.getAttribute('aria-label');
+    if (text === 'Envoyer sans note' || text === 'Send' || text.includes('Envoyer') || text.includes('Send') ||
+        ariaLabel?.includes('Envoyer') || ariaLabel?.includes('Send')) {
       button.click();
       return true;
     }
   }
+
   return false;
 }
 

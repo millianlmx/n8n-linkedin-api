@@ -1892,45 +1892,42 @@ class LinkedInService {
 
       // Detect which UI flow to use and check if connection button exists
       const connectionCheck = await page.evaluate(() => {
-        // Try multiple selectors for profile header (LinkedIn changes classes frequently)
-        const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-          document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-          document.querySelector('div.ph5');
-
-        if (!profileHeader) {
-          return { uiType: 'unknown', hasConnectButton: false };
+        // First, try to find any connect button using stable selectors
+        const inviteButton = document.querySelector('button[aria-label*="Invitez"]');
+        if (inviteButton) {
+          return { uiType: 'stable-aria', hasConnectButton: true };
         }
 
-        // Check for direct "Se connecter" button in the action bar
-        const directConnectButton = profileHeader.querySelector(
-          'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > button'
-        ) as HTMLButtonElement;
+        // Check for primary button with connect text
+        const primaryButtons = Array.from(document.querySelectorAll('button.artdeco-button--primary'));
+        const connectPrimary = primaryButtons.find(btn => {
+          const text = btn.textContent?.trim() || '';
+          const ariaLabel = btn.getAttribute('aria-label') || '';
+          return text === 'Se connecter' || text === 'Connect' ||
+                 ariaLabel.includes('rejoindre votre réseau');
+        });
 
-        if (directConnectButton) {
-          const buttonText = directConnectButton.textContent?.trim() || '';
-          if (buttonText.includes('Se connecter') || buttonText.includes('Connect')) {
-            return { uiType: 'direct', hasConnectButton: true };
-          }
+        if (connectPrimary) {
+          return { uiType: 'primary-button', hasConnectButton: true };
         }
 
-        // Check for "More" dropdown button
-        const moreButton = profileHeader.querySelector(
-          'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > button'
-        ) as HTMLButtonElement;
-
+        // Check if there's a "More" button (dropdown scenario)
+        const moreButton = document.querySelector('button[aria-label*="Plus"]');
         if (moreButton) {
           return { uiType: 'dropdown', hasConnectButton: true };
         }
 
-        // Fallback: try to find any connect button
-        const fallbackButton = document.querySelector('button[aria-label*="Invitez"]') ||
-          Array.from(document.querySelectorAll('button.artdeco-button--primary')).find(btn => {
-            const text = btn.textContent?.trim() || '';
-            return text.includes('Se connecter') || text.includes('Connect');
-          });
+        // Check for any button with connect-related text
+        const allButtons = Array.from(document.querySelectorAll('button'));
+        const connectButton = allButtons.find(btn => {
+          const text = btn.textContent?.trim() || '';
+          const ariaLabel = btn.getAttribute('aria-label') || '';
+          return text.includes('Se connecter') || text.includes('Connect') ||
+                 ariaLabel.includes('Inviter') || ariaLabel.includes('Connect');
+        });
 
-        if (fallbackButton) {
-          return { uiType: 'regular', hasConnectButton: true };
+        if (connectButton) {
+          return { uiType: 'text-match', hasConnectButton: true };
         }
 
         return { uiType: 'none', hasConnectButton: false };
@@ -1946,141 +1943,18 @@ class LinkedInService {
 
       let buttonClicked = false;
 
-      if (connectionCheck.uiType === 'direct') {
-        // Direct "Se connecter" button flow
-        log.debug('Using direct connect button flow');
+      // Use the improved clickConnectButton function for all UI types
+      // This function handles all the different LinkedIn UI variations
+      log.debug('Attempting to click connect button');
 
-        buttonClicked = await page.evaluate(() => {
-          const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-            document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-            document.querySelector('div.ph5');
+      buttonClicked = await page.evaluate(DOMFunctions.clickConnectButton);
 
-          if (!profileHeader) return false;
-
-          const directConnectButton = profileHeader.querySelector(
-            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > button'
-          ) as HTMLButtonElement;
-
-          if (directConnectButton) {
-            const buttonText = directConnectButton.textContent?.trim() || '';
-            if (buttonText.includes('Se connecter') || buttonText.includes('Connect')) {
-              directConnectButton.click();
-              return true;
-            }
-          }
-
-          return false;
-        });
-
-        if (!buttonClicked) {
-          log.warn('Direct connect button not found or not clickable');
-          return { success: false, message: 'Connect button not found' };
-        }
-
-        log.debug('Clicked direct connect button');
-
-      } else if (connectionCheck.uiType === 'dropdown') {
-        // Dropdown flow: Click "More" button, then find "Se connecter" in dropdown
-        log.debug('Using dropdown flow');
-
-        // Click the "More" dropdown button
-        const moreButtonClicked = await page.evaluate(() => {
-          const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-            document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-            document.querySelector('div.ph5');
-
-          if (!profileHeader) return false;
-
-          const moreButton = profileHeader.querySelector(
-            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > button'
-          ) as HTMLButtonElement;
-
-          if (moreButton) {
-            moreButton.click();
-            return true;
-          }
-          return false;
-        });
-
-        if (!moreButtonClicked) {
-          log.warn('More button not found');
-          return { success: false, message: 'More button not found' };
-        }
-
-        log.debug('Clicked More button, waiting for dropdown');
-        await this.wait(500);
-
-        // Click "Se connecter" in the dropdown menu
-        buttonClicked = await page.evaluate(() => {
-          const profileHeader = document.querySelector('section.artdeco-card > div.ph5') ||
-            document.querySelector('section.artdeco-card > div.ph5.pb5') ||
-            document.querySelector('div.ph5');
-
-          if (!profileHeader) return false;
-
-          const dropdownMenu = profileHeader.querySelector(
-            'div.fkPRblCvkHKJfCAECsQUDHyUlbzCBcJti > div > div.artdeco-dropdown > div > div > ul'
-          );
-
-          if (!dropdownMenu) return false;
-
-          const menuItems = dropdownMenu.querySelectorAll('li > div');
-
-          for (const item of Array.from(menuItems)) {
-            const text = item.textContent?.trim() || '';
-            if (text.includes('Se connecter') || text.includes('Connect')) {
-              (item as HTMLElement).click();
-              return true;
-            }
-          }
-          return false;
-        });
-
-        if (!buttonClicked) {
-          log.warn('Connect option not found in dropdown');
-          return { success: false, message: 'Connect option not found in dropdown' };
-        }
-
-        log.debug('Clicked connect option from dropdown');
-
-      } else if (connectionCheck.uiType === 'regular') {
-        // Fallback regular flow: Try to find any connect button
-        log.debug('Using fallback regular profile flow');
-
-        buttonClicked = await page.evaluate(() => {
-          // Try aria-label selector first
-          let connectButton = document.querySelector(
-            'button[aria-label*="Invitez"]'
-          ) as HTMLButtonElement;
-
-          if (!connectButton) {
-            // Try finding by button text content
-            const buttons = Array.from(document.querySelectorAll('button.artdeco-button--primary'));
-            connectButton = buttons.find(btn => {
-              const text = btn.textContent?.trim() || '';
-              return text.includes('Se connecter') || text.includes('Connect');
-            }) as HTMLButtonElement;
-          }
-
-          if (connectButton) {
-            connectButton.click();
-            return true;
-          }
-
-          return false;
-        });
-
-        if (!buttonClicked) {
-          log.warn('Connect button not found in fallback flow');
-          return { success: false, message: 'Connect button not found' };
-        }
-
-        log.debug('Clicked connect button (fallback flow)');
-
-      } else {
-        log.error('Unknown UI type detected');
-        return { success: false, message: 'Could not find connect button (unknown UI type)' };
+      if (!buttonClicked) {
+        log.warn('Connect button not found or not clickable using any selector');
+        return { success: false, message: 'Connect button not found - may already be connected or request sent' };
       }
+
+      log.debug('Successfully clicked connect button');
 
       // Wait for modal to appear
       await this.wait(500);
