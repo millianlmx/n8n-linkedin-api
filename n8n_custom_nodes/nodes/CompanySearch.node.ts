@@ -39,6 +39,12 @@ export class CompanySearch implements INodeType {
 						description: 'Search for companies on LinkedIn',
 						action: 'Search for companies',
 					},
+					{
+						name: 'Search Members',
+						value: 'searchMembers',
+						description: 'Find founders or C-level at a company',
+						action: 'Search for company members',
+					},
 				],
 				default: 'searchCompanies',
 			},
@@ -121,6 +127,36 @@ export class CompanySearch implements INodeType {
 				placeholder: '105015875',
 			},
 			{
+				displayName: 'Company URL',
+				name: 'companyUrl',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: {
+					show: {
+						operation: ['searchMembers'],
+					},
+				},
+				description: 'LinkedIn company page URL',
+				placeholder: 'https://www.linkedin.com/company/example/',
+			},
+			{
+				displayName: 'Member Limit',
+				name: 'memberLimit',
+				type: 'number',
+				default: 10,
+				displayOptions: {
+					show: {
+						operation: ['searchMembers'],
+					},
+				},
+				description: 'Maximum number of members to return',
+				typeOptions: {
+					minValue: 1,
+					maxValue: 50,
+				},
+			},
+			{
 				displayName: 'Session ID (Legacy)',
 				name: 'sessionId',
 				type: 'string',
@@ -163,6 +199,24 @@ export class CompanySearch implements INodeType {
 					const response = await this.helpers.httpRequest({
 						method: 'POST',
 						url: `${baseUrl}/api/search/companies`,
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body,
+						json: true,
+					});
+
+					responseData = response;
+				} else if (operation === 'searchMembers') {
+					const companyUrl = this.getNodeParameter('companyUrl', i) as string;
+					const limit = this.getNodeParameter('memberLimit', i, 10) as number;
+
+					const body: any = { companyUrl, limit };
+					if (sessionId) body.sessionId = sessionId;
+
+					const response = await this.helpers.httpRequest({
+						method: 'POST',
+						url: `${baseUrl}/api/search/company-members`,
 						headers: {
 							'Content-Type': 'application/json',
 						},

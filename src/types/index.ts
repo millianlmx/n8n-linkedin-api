@@ -83,3 +83,19 @@ export interface CompanySearchResult {
   followers: string;
   logoUrl: string;
 }
+
+export interface CompanyMemberResult {
+  company: {
+    name: string;
+    url: string;
+    employeeRange: string;
+    companyId: string;
+  };
+  members: {
+    name: string;
+    title: string;
+    location: string;
+    profileUrl: string;
+  }[];
+  searchStrategy: 'founder' | 'clevel';
+}

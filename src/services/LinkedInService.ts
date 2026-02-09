@@ -3,7 +3,7 @@ import LinkedInBrowser from './LinkedInBrowser';
 import { CacheService } from './CacheService';
 import CaptchaService from './CaptchaService';
 import MetricsService from './MetricsService';
-import { SendMessageRequest, LoginRequest, ProfileScrapeRequest, CompanySearchResult } from '../types';
+import { SendMessageRequest, LoginRequest, ProfileScrapeRequest, CompanySearchResult, CompanyMemberResult } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
 import { createServiceLogger } from '../utils/logger';
 
@@ -2225,6 +2225,176 @@ class LinkedInService {
     } catch (error: any) {
       log.error('Company search failed', error, { keywords });
       throw new Error(`Company search failed: ${error.message}`);
+    }
+  }
+
+  async searchCompanyMembers(
+    _sessionId: string,
+    companyUrl: string,
+    limit: number = 10
+  ): Promise<{ success: boolean; data: CompanyMemberResult }> {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
+    }
+
+    const page = this.getPage(_sessionId);
+
+    try {
+      log.info('Searching for company members', { companyUrl, limit });
+
+      // Step 1: Navigate to company page
+      await this.enforceRateLimit();
+      await page.goto(companyUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      // Wait for the employee link to appear
+      await page.waitForSelector('a[href*="currentCompany"]', { timeout: 10000 }).catch(() => {
+        log.debug('Employee link selector timeout, continuing');
+      });
+
+      // Step 2: Extract employee range + company ID
+      const companyInfo = await page.evaluate(() => {
+        const empLink = document.querySelector('a[href*="currentCompany"]') as HTMLAnchorElement;
+        if (!empLink) return null;
+
+        // Extract company ID from URL
+        const href = empLink.href;
+        const match = href.match(/currentCompany=%5B%22(\d+)%22%5D/);
+        const companyId = match ? match[1] : '';
+
+        // Extract employee range from text (e.g. "11-50 employés")
+        const text = empLink.textContent?.trim() || '';
+        const rangeMatch = text.match(/(\d[\d\s,.]*)-?(\d[\d\s,.]*)?\s*employ/i);
+        const employeeRange = rangeMatch ? rangeMatch[0].replace(/\s*employ.*/, '') : text;
+
+        // Parse upper bound for size classification
+        const upperBound = rangeMatch?.[2]
+          ? parseInt(rangeMatch[2].replace(/[\s,.]/g, ''))
+          : parseInt((rangeMatch?.[1] || '0').replace(/[\s,.]/g, ''));
+
+        // Get company name from h1
+        const nameEl = document.querySelector('h1');
+        const name = nameEl?.textContent?.trim() || '';
+
+        return { companyId, employeeRange, upperBound, name };
+      });
+
+      if (!companyInfo || !companyInfo.companyId) {
+        throw new Error('Could not extract company info. The company page may not have loaded correctly.');
+      }
+
+      log.info('Company info extracted', { name: companyInfo.name, employeeRange: companyInfo.employeeRange, companyId: companyInfo.companyId, upperBound: companyInfo.upperBound });
+
+      // Step 3: Determine search strategy
+      const SMALL_TITLES = 'fondateur OR co-fondateur OR gérant';
+      const LARGE_TITLES = 'fondateur OR co-fondateur OR gérant OR CEO OR CTO OR CDO OR CPO OR PDG OR "Directeur Général" OR "Directeur Technique"';
+
+      const isSmall = (companyInfo.upperBound || 0) <= 50;
+      const strategy: 'founder' | 'clevel' = isSmall ? 'founder' : 'clevel';
+      const titleKeywords = isSmall ? SMALL_TITLES : LARGE_TITLES;
+
+      log.info('Search strategy determined', { strategy, isSmall, upperBound: companyInfo.upperBound });
+
+      // Step 4: Navigate to people search with currentCompany filter
+      await this.enforceRateLimit();
+      const searchParams = new URLSearchParams();
+      searchParams.set('currentCompany', JSON.stringify([companyInfo.companyId]));
+      searchParams.set('keywords', titleKeywords);
+      searchParams.set('origin', 'COMPANY_PAGE_CANNED_SEARCH');
+
+      const searchUrl = `https://www.linkedin.com/search/results/people/?${searchParams.toString()}`;
+      await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      // Step 5: Extract people results
+      let members: { name: string; title: string; location: string; profileUrl: string }[] = [];
+
+      // Try primary selectors first
+      try {
+        await page.waitForSelector('.reusable-search__result-container', { timeout: 8000 });
+
+        members = await page.evaluate((maxResults: number) => {
+          const resultItems = document.querySelectorAll('.reusable-search__result-container');
+          const results: { name: string; title: string; location: string; profileUrl: string }[] = [];
+
+          resultItems.forEach((item, index) => {
+            if (index >= maxResults) return;
+
+            const nameEl = item.querySelector('.entity-result__title-text a span[aria-hidden="true"]');
+            const titleEl = item.querySelector('.entity-result__primary-subtitle');
+            const locationEl = item.querySelector('.entity-result__secondary-subtitle');
+            const linkEl = item.querySelector('.entity-result__title-text a') as HTMLAnchorElement;
+
+            if (nameEl && linkEl) {
+              results.push({
+                name: nameEl.textContent?.trim() || '',
+                title: titleEl?.textContent?.trim() || '',
+                location: locationEl?.textContent?.trim() || '',
+                profileUrl: linkEl.href?.split('?')[0] || '',
+              });
+            }
+          });
+
+          return results;
+        }, limit);
+      } catch {
+        log.debug('Primary selectors failed, trying fallback');
+
+        // Fallback: wait for any profile link in main content
+        try {
+          await page.waitForSelector('[role="main"] a[href*="/in/"]', { timeout: 8000 });
+        } catch {
+          log.debug('No results found with fallback selector either');
+        }
+
+        members = await page.evaluate((maxResults: number) => {
+          const main = document.querySelector('[role="main"]');
+          if (!main) return [];
+          const links = main.querySelectorAll('a[href*="/in/"]');
+          const results: { name: string; title: string; location: string; profileUrl: string }[] = [];
+          const seen = new Set<string>();
+
+          links.forEach((link) => {
+            if (results.length >= maxResults) return;
+            const href = (link as HTMLAnchorElement).href?.split('?')[0] || '';
+            if (!href || seen.has(href) || !href.includes('/in/')) return;
+            seen.add(href);
+
+            const container = link.closest('li') || link.closest('[data-view-name]') || link.parentElement;
+            if (!container) return;
+
+            const nameEl = link.querySelector('span[aria-hidden="true"]') || link.querySelector('span');
+            const name = nameEl?.textContent?.trim() || '';
+            if (!name) return;
+
+            const allText = container.textContent || '';
+            const nameIdx = allText.indexOf(name);
+            const afterName = nameIdx >= 0 ? allText.substring(nameIdx + name.length) : '';
+            const parts = afterName.split(/[·•]/);
+            const title = parts[0]?.trim().replace(/^\d+e.*?\+?\s*/, '') || '';
+
+            results.push({ name, title, location: '', profileUrl: href });
+          });
+          return results;
+        }, limit);
+      }
+
+      log.info('Company members search completed', { memberCount: members.length, strategy });
+
+      return {
+        success: true,
+        data: {
+          company: {
+            name: companyInfo.name,
+            url: companyUrl,
+            employeeRange: companyInfo.employeeRange,
+            companyId: companyInfo.companyId,
+          },
+          members,
+          searchStrategy: strategy,
+        },
+      };
+    } catch (error: any) {
+      log.error('Company members search failed', error, { companyUrl });
+      throw new Error(`Company members search failed: ${error.message}`);
     }
   }
 
