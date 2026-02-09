@@ -3,7 +3,7 @@ import LinkedInBrowser from './LinkedInBrowser';
 import { CacheService } from './CacheService';
 import CaptchaService from './CaptchaService';
 import MetricsService from './MetricsService';
-import { SendMessageRequest, LoginRequest, ProfileScrapeRequest } from '../types';
+import { SendMessageRequest, LoginRequest, ProfileScrapeRequest, CompanySearchResult } from '../types';
 import * as DOMFunctions from '../utils/linkedin-dom-functions';
 import { createServiceLogger } from '../utils/logger';
 
@@ -2105,6 +2105,126 @@ class LinkedInService {
     } catch (error: any) {
       log.error('Search failed', error, { keywords });
       throw new Error(`Search failed: ${error.message}`);
+    }
+  }
+
+  async searchCompanies(
+    _sessionId: string,
+    keywords: string,
+    limit: number = 10,
+    companySize?: string[],
+    industry?: string[],
+    location?: string[]
+  ): Promise<{ success: boolean; data: CompanySearchResult[] }> {
+    if (!LinkedInBrowser.isReady() || !LinkedInBrowser.isAuthenticated()) {
+      throw new Error('Not authenticated');
+    }
+
+    const page = this.getPage(_sessionId);
+
+    try {
+      log.info('Searching for companies', { keywords, limit, companySize, industry, location });
+
+      const allResults: CompanySearchResult[] = [];
+      const totalPages = Math.ceil(limit / 10);
+
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        if (pageNum > 1) {
+          await this.enforceRateLimit();
+        }
+
+        // Build search URL with filter params
+        const params = new URLSearchParams();
+        params.set('keywords', keywords);
+        if (companySize?.length) params.set('companySize', JSON.stringify(companySize));
+        if (industry?.length) params.set('industryCompanyVertical', JSON.stringify(industry));
+        if (location?.length) params.set('companyHqGeo', JSON.stringify(location));
+        params.set('page', String(pageNum));
+
+        const searchUrl = `https://www.linkedin.com/search/results/companies/?${params.toString()}`;
+
+        await page.goto(searchUrl, {
+          waitUntil: 'networkidle2',
+          timeout: 30000,
+        });
+
+        // Wait for results
+        try {
+          await page.waitForSelector('[role="main"] [role="listitem"]', { timeout: 10000 });
+        } catch {
+          log.info('No more company results found', { pageNum });
+          break;
+        }
+
+        // Extract company data from DOM
+        const companies = await page.evaluate(() => {
+          const items = document.querySelectorAll('[role="main"] [role="listitem"]');
+          const results: any[] = [];
+
+          items.forEach((item) => {
+            try {
+              const topSection = item.children[0] as HTMLElement;
+              if (!topSection) return;
+
+              // Logo
+              const imgEl = topSection.querySelector('figure img') as HTMLImageElement;
+              const logoUrl = imgEl?.src || '';
+
+              // Company link (name + URL)
+              const linkEl = topSection.querySelector('a[href*="/company/"], a[href*="/showcase/"]') as HTMLAnchorElement;
+              const name = linkEl?.querySelector('span')?.textContent?.trim() || '';
+              const url = linkEl?.href?.split('?')[0] || '';
+
+              if (!name || !url) return;
+
+              // Info div: contains industry and location paragraphs
+              const infoDiv = topSection.children[1] as HTMLElement;
+              const paragraphs = infoDiv ? infoDiv.querySelectorAll('p') : [];
+              // First p after the link is industry, next is location
+              const industryText = paragraphs.length > 1 ? (paragraphs[1] as HTMLElement).textContent?.trim() || '' : '';
+              const locationText = paragraphs.length > 2 ? (paragraphs[2] as HTMLElement).textContent?.trim() || '' : '';
+
+              // Bottom section: description + followers
+              const bottomSection = item.children[1] as HTMLElement;
+              let description = '';
+              let followers = '';
+
+              if (bottomSection) {
+                const bottomParagraphs = bottomSection.querySelectorAll('p');
+                bottomParagraphs.forEach((p) => {
+                  const text = (p as HTMLElement).textContent?.trim() || '';
+                  // Followers line contains digits followed by language-agnostic word
+                  if (/[\d\s,.k]+\s+\S+$/.test(text) && (text.match(/\d/) !== null)) {
+                    if (!followers) followers = text;
+                  } else if (text && !description) {
+                    description = text;
+                  }
+                });
+              }
+
+              results.push({ name, url, industry: industryText, location: locationText, description, followers, logoUrl });
+            } catch {
+              // Skip malformed items
+            }
+          });
+
+          return results;
+        });
+
+        allResults.push(...companies);
+        log.info('Company search page extracted', { pageNum, count: companies.length, total: allResults.length });
+
+        if (allResults.length >= limit || companies.length < 10) {
+          break;
+        }
+      }
+
+      const finalResults = allResults.slice(0, limit);
+      log.info('Company search completed', { resultCount: finalResults.length });
+      return { success: true, data: finalResults };
+    } catch (error: any) {
+      log.error('Company search failed', error, { keywords });
+      throw new Error(`Company search failed: ${error.message}`);
     }
   }
 

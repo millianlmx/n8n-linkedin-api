@@ -65,3 +65,21 @@ export interface Conversation {
   lastMessage?: string;
   timestamp?: string;
 }
+
+export interface CompanySearchRequest {
+  keywords: string;
+  limit?: number;
+  companySize?: string[];     // ["B","C","D"...]
+  industry?: string[];        // ["96","6"...]
+  location?: string[];        // ["105015875"...]
+}
+
+export interface CompanySearchResult {
+  name: string;
+  url: string;
+  industry: string;
+  location: string;
+  description: string;
+  followers: string;
+  logoUrl: string;
+}

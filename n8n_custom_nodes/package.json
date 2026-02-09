@@ -28,7 +28,8 @@
       "dist/nodes/Profile.node.js",
       "dist/nodes/Connection.node.js",
       "dist/nodes/Messaging.node.js",
-      "dist/nodes/Search.node.js"
+      "dist/nodes/Search.node.js",
+      "dist/nodes/CompanySearch.node.js"
     ]
   },
   "devDependencies": {
