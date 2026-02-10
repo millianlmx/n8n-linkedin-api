@@ -262,8 +262,8 @@ describe('LinkedIn DOM Functions', () => {
       const result = DOMFunctions.extractConversationMessages();
       
       expect(result).toHaveLength(1);
-      // Should contain a formatted date like "8 nov."
-      expect(result[0].timestamp).toMatch(/\d+ \w+\. 10:30/);
+      // Should contain a formatted date like "10 févr. 10:30"
+      expect(result[0].timestamp).toMatch(/\d+ .+\. 10:30/);
     });
 
     it('should convert "Yesterday" to actual date', () => {
@@ -283,8 +283,8 @@ describe('LinkedIn DOM Functions', () => {
       const result = DOMFunctions.extractConversationMessages();
       
       expect(result).toHaveLength(1);
-      // Should contain a formatted date like "7 nov."
-      expect(result[0].timestamp).toMatch(/\d+ \w+\. 15:00/);
+      // Should contain a formatted date like "9 févr. 15:00"
+      expect(result[0].timestamp).toMatch(/\d+ .+\. 15:00/);
     });
 
     it('should convert weekday names to actual dates (French)', () => {
@@ -372,7 +372,7 @@ describe('LinkedIn DOM Functions', () => {
     });
 
     it('should find and click connect button by text content', () => {
-      document.body.innerHTML = '<button>Connect</button>';
+      document.body.innerHTML = '<button class="artdeco-button--primary">Se connecter</button>';
       const button = document.querySelector('button') as HTMLButtonElement;
       const clickSpy = jest.spyOn(button, 'click');
 
@@ -394,7 +394,7 @@ describe('LinkedIn DOM Functions', () => {
   describe('checkAddNoteButton', () => {
     it('should return true when add note button exists', () => {
       document.body.innerHTML = `
-        <div id="artdeco-modal-outlet">
+        <div role="dialog">
           <button>Add a note</button>
         </div>
       `;
@@ -419,7 +419,7 @@ describe('LinkedIn DOM Functions', () => {
       button.textContent = 'Add a note';
       button.click = jest.fn();
       const modal = document.createElement('div');
-      modal.id = 'artdeco-modal-outlet';
+      modal.setAttribute('role', 'dialog');
       modal.appendChild(button);
       document.body.appendChild(modal);
 
@@ -459,7 +459,7 @@ describe('LinkedIn DOM Functions', () => {
       button.setAttribute('aria-label', 'Send invitation');
       button.click = jest.fn();
       const modal = document.createElement('div');
-      modal.id = 'artdeco-modal-outlet';
+      modal.setAttribute('role', 'dialog');
       modal.appendChild(button);
       document.body.appendChild(modal);
 
