@@ -2148,17 +2148,57 @@ class LinkedInService {
           timeout: 30000,
         });
 
-        // Wait for results
+        // Wait for results using multiple fallback selectors
+        let resultsSelector = '';
         try {
-          await page.waitForSelector('[role="main"] [role="listitem"]', { timeout: 10000 });
+          // Try role-based selector first (modern LinkedIn)
+          await page.waitForSelector('[role="main"] [role="listitem"]', { timeout: 5000 });
+          resultsSelector = '[role="main"] [role="listitem"]';
         } catch {
-          log.info('No more company results found', { pageNum });
-          break;
+          try {
+            // Fallback: company links inside main area
+            await page.waitForSelector('[role="main"] a[href*="/company/"]', { timeout: 5000 });
+            resultsSelector = 'company-links';
+          } catch {
+            // Debug: log what's on the page
+            const debugInfo = await page.evaluate(() => {
+              const main = document.querySelector('[role="main"]');
+              return {
+                url: window.location.href,
+                mainExists: !!main,
+                mainChildCount: main?.children.length || 0,
+                mainText: main?.textContent?.substring(0, 200) || '',
+                bodyClasses: document.body.className.substring(0, 200),
+              };
+            });
+            log.info('No more company results found', { pageNum, debugInfo });
+            break;
+          }
         }
 
         // Extract company data from DOM
-        const companies = await page.evaluate(() => {
-          const items = document.querySelectorAll('[role="main"] [role="listitem"]');
+        const companies = await page.evaluate((selector) => {
+          // Use listitem role if available, otherwise find items via company links
+          let items: NodeListOf<Element> | Element[];
+          if (selector === 'company-links') {
+            // Get unique parent containers of company links
+            const links = document.querySelectorAll('[role="main"] a[href*="/company/"], [role="main"] a[href*="/showcase/"]');
+            const seen = new Set<Element>();
+            items = [] as Element[];
+            links.forEach(link => {
+              // Walk up to find the result container (typically 2-3 levels up)
+              let container = link.parentElement;
+              while (container && container.getAttribute('role') !== 'listitem' && container.parentElement?.getAttribute('role') !== 'list') {
+                container = container.parentElement;
+              }
+              if (container && !seen.has(container)) {
+                seen.add(container);
+                (items as Element[]).push(container);
+              }
+            });
+          } else {
+            items = document.querySelectorAll('[role="main"] [role="listitem"]');
+          }
           const results: any[] = [];
 
           items.forEach((item) => {
@@ -2172,7 +2212,7 @@ class LinkedInService {
 
               // Company link (name + URL)
               const linkEl = topSection.querySelector('a[href*="/company/"], a[href*="/showcase/"]') as HTMLAnchorElement;
-              const name = linkEl?.querySelector('span')?.textContent?.trim() || '';
+              const name = linkEl?.textContent?.trim() || '';
               const url = linkEl?.href?.split('?')[0] || '';
 
               if (!name || !url) return;
@@ -2209,7 +2249,7 @@ class LinkedInService {
           });
 
           return results;
-        });
+        }, resultsSelector);
 
         allResults.push(...companies);
         log.info('Company search page extracted', { pageNum, count: companies.length, total: allResults.length });
