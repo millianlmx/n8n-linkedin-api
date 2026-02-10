@@ -96,9 +96,6 @@ describe('SessionManager', () => {
       const originalSession = SessionManager.getSession(sessionId);
       const originalLastUsed = originalSession?.lastUsed.getTime();
 
-      // Wait a bit to ensure timestamp difference
-      jest.advanceTimersByTime(100);
-
       // Execution
       const updatedSession = SessionManager.getSession(sessionId);
 
@@ -125,9 +122,6 @@ describe('SessionManager', () => {
       const sessionId = SessionManager.createSession(mockBrowser, mockPage);
       const originalSession = SessionManager.getSession(sessionId);
       const originalLastUsed = originalSession?.lastUsed.getTime();
-
-      // Wait a bit
-      jest.advanceTimersByTime(100);
 
       // Execution
       SessionManager.updateSession(sessionId, { isAuthenticated: true });
